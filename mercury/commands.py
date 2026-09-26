@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import click
 from flask import current_app
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from mercury.accounts.models import GmailAccount, OAuthAttempt, SecurityAuditEvent, User
 from mercury.accounts.service import connect_fake_mailbox, get_or_create_demo_user
@@ -31,6 +31,21 @@ def register_commands(app) -> None:
         analyze_pending(user.id, onboarding=True)
         seed_demo_buckets(account)
         click.echo(f"Synthetic workspace ready for {user.email}")
+
+    @app.cli.command("queue-schema")
+    def queue_schema() -> None:
+        """Install the Procrastinate schema once; safe to run on every release."""
+        installed = db.session.scalar(
+            text("SELECT to_regclass('public.procrastinate_jobs') IS NOT NULL")
+        )
+        db.session.rollback()
+        if installed:
+            click.echo("Procrastinate schema already installed.")
+            return
+        queue_app = current_app.extensions["mercury"]["queue"]
+        with queue_app.open():
+            queue_app.schema_manager.apply_schema()
+        click.echo("Procrastinate schema installed.")
 
     @app.cli.command("promote-admin")
     @click.argument("email")

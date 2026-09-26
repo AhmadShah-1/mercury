@@ -1,3 +1,59 @@
-{% extends "base.html" %}{% block title %}Help — Mercury{% endblock %}
-{% block content %}<article class="document"><h1>Help</h1><h2>What Mercury changes</h2><p>Bucket moves and handled markers are local to Mercury unless optional label synchronization is explicitly enabled.</p><h2>Attachments and replies</h2><p>Use Open in Gmail for attachments, replies, and the authoritative conversation.</p><h2>Connection problems</h2><p>If authorization expires, reconnect from Settings. Mercury will not silently use a synthetic provider for a real account.</p></article>{% endblock %}
+{% extends "base.html" %}
+{% from "components/icons.html" import icon %}
+{% block title %}Help — Mercury{% endblock %}
+{% block content %}
+<article class="doc">
+  <div class="doc-card">
+    <p class="eyebrow">Help</p>
+    <h1>Getting around Mercury</h1>
+    <p class="lead-m">Short answers to common questions. Gmail remains the place to reply, forward, and open attachments.</p>
+    <div class="faq">
+      <details open>
+        <summary>What does Mercury change? {{ icon("chevron-down", "icon-sm") }}</summary>
+        <div><p>Bucket moves and handled markers are local to Mercury unless optional label synchronization is explicitly enabled. Mercury never sends, deletes, or archives mail.</p></div>
+      </details>
+      <details>
+        <summary>Attachments and replies {{ icon("chevron-down", "icon-sm") }}</summary>
+        <div><p>Use <strong>Open in Gmail</strong> for attachments, replies, and the authoritative conversation. Mercury notes when attachments exist but never downloads them.</p></div>
+      </details>
+      <details>
+        <summary>“Unread in Gmail” vs. “New in Mercury” {{ icon("chevron-down", "icon-sm") }}</summary>
+        <div><p><strong>Unread in Gmail</strong> mirrors Gmail's own unread state. <strong>New in Mercury</strong> means you haven't opened the conversation in Mercury yet. Reading in Mercury doesn't mark anything read in Gmail.</p></div>
+      </details>
+      <details>
+        <summary>Why is a conversation in Unsorted? {{ icon("chevron-down", "icon-sm") }}</summary>
+        <div><p>When Mercury isn't confident about a category, it leaves the conversation in Unsorted rather than guessing. Move it yourself, or add an exact-sender rule; manual choices always win over suggestions.</p></div>
+      </details>
+      <details>
+        <summary>A summary says “may be outdated” {{ icon("chevron-down", "icon-sm") }}</summary>
+        <div><p>New messages arrived after the summary was written. The original text in the reader is always current; the summary refreshes in the background.</p></div>
+      </details>
+      <details>
+        <summary>Summaries are paused or off {{ icon("chevron-down", "icon-sm") }}</summary>
+        <div><p><em>Off</em> means you chose not to send text to an AI provider, or the operator disabled AI. <em>Paused</em> means the AI budget for the period was reached. Reading and organizing keep working either way.</p></div>
+      </details>
+      <details>
+        <summary>Connection problems {{ icon("chevron-down", "icon-sm") }}</summary>
+        <div><p>If authorization expires, reconnect from Settings. Mercury will not silently use a synthetic provider for a real account. If Gmail is temporarily unavailable, try again shortly — saved summaries stay visible but are never presented as the original.</p></div>
+      </details>
+    </div>
 
+    <h2>Keyboard shortcuts</h2>
+    <div class="table-wrap">
+      <table class="table-m">
+        <thead><tr><th scope="col">Keys</th><th scope="col">Action</th></tr></thead>
+        <tbody>
+          <tr><td><kbd>j</kbd> / <kbd>k</kbd> or <kbd>↓</kbd> / <kbd>↑</kbd></td><td>Next / previous conversation</td></tr>
+          <tr><td><kbd>Enter</kbd> or <kbd>o</kbd></td><td>Open in the reader</td></tr>
+          <tr><td><kbd>x</kbd></td><td>Select for bulk move</td></tr>
+          <tr><td><kbd>m</kbd></td><td>Move selected conversations</td></tr>
+          <tr><td><kbd>/</kbd></td><td>Filter the conversations shown</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Return to the list</td></tr>
+          <tr><td><kbd>?</kbd></td><td>Show shortcuts</td></tr>
+        </tbody>
+      </table>
+    </div>
+    {% if config.SUPPORT_EMAIL %}<p>Still stuck? Email <a href="mailto:{{ config.SUPPORT_EMAIL }}">{{ config.SUPPORT_EMAIL }}</a>.</p>{% endif %}
+  </div>
+</article>
+{% endblock %}

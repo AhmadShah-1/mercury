@@ -1,6 +1,123 @@
-{% extends "base.html" %}{% block title %}Settings — Mercury{% endblock %}
-{% block content %}<section class="document"><h1>Settings</h1>
-{% if current_user.gmail_account %}<dl><dt>Mailbox</dt><dd>{{ current_user.gmail_account.mailbox_address }}</dd><dt>Status</dt><dd>{{ current_user.gmail_account.connection_state }}</dd><dt>AI transfer</dt><dd>{{ 'Enabled' if current_user.gmail_account.ai_consent else 'Disabled' }}</dd></dl>
-<h2>Optional Gmail labels</h2><p>Mercury can apply only labels it creates and records. This requires the broader <code>gmail.modify</code> scope, although Mercury implements no sending, deletion, archiving, or attachment operations.</p><form method="post" action="{{ url_for('accounts.label_settings') }}">{{ label_form.hidden_tag() }}{{ label_form.enabled() }} {{ label_form.enabled.label }} {{ label_form.submit(class_='btn btn-outline-primary') }}</form>
-<h2>Disconnect Gmail</h2><p>This stops processing and removes tokens, indexed metadata, summaries, embeddings, rules, and buckets. Gmail messages and labels remain.</p><form method="post" action="{{ url_for('accounts.disconnect') }}">{{ disconnect_form.hidden_tag() }}<button class="btn btn-outline-danger" type="submit">Disconnect and remove mailbox data</button></form>{% else %}<p>No Gmail account is connected.</p>{% endif %}
-<h2>Delete Mercury account</h2><form method="post" action="{{ url_for('accounts.delete_account') }}">{{ delete_form.hidden_tag() }}{{ delete_form.confirmation.label }}{{ delete_form.confirmation(class_='form-control') }}{{ delete_form.submit(class_='btn btn-danger') }}</form></section>{% endblock %}
+{% extends "base.html" %}
+{% from "components/icons.html" import icon %}
+{% from "components/ui.html" import badge, state, connection_badge %}
+{% block title %}Settings — Mercury{% endblock %}
+{% block content %}
+{% set account = current_user.gmail_account %}
+<section class="wide-page settings-page">
+  <header class="page-head">
+    <p class="eyebrow">Settings</p>
+    <h1 class="page-title">Account and mailbox</h1>
+    <p class="lead-m">Control what Mercury can do with your Gmail and how to stop it.</p>
+  </header>
+
+  <section class="panel" aria-labelledby="account-heading">
+    <div class="panel-head">
+      <span class="panel-icon">{{ icon("user") }}</span>
+      <div><h2 class="panel-title" id="account-heading">Mercury account</h2><p class="panel-sub">Signed in {% if config.AUTH_MODE == "dev" %}with a synthetic demo identity{% else %}with Google{% endif %}.</p></div>
+    </div>
+    <dl class="kv">
+      <dt>Name</dt><dd>{{ current_user.display_name }}</dd>
+      <dt>Email</dt><dd>{{ current_user.email }}</dd>
+    </dl>
+  </section>
+
+  <section class="panel" aria-labelledby="mailbox-heading">
+    <div class="panel-head">
+      <span class="panel-icon">{{ icon("mail") }}</span>
+      <div><h2 class="panel-title" id="mailbox-heading">Gmail connection</h2><p class="panel-sub">One connected Gmail account per Mercury account.</p></div>
+    </div>
+    {% if account %}
+      <dl class="kv">
+        <dt>Mailbox</dt><dd>{{ account.mailbox_address }}{% if config.MAIL_MODE == "fake" %} {{ badge("Synthetic", "neutral", "bolt") }}{% endif %}</dd>
+        <dt>Status</dt><dd>{{ connection_badge(account.connection_state) }}</dd>
+        <dt>Last sync</dt><dd>{% if account.last_synced_at %}<time datetime="{{ account.last_synced_at.isoformat() }}" data-localtime="long">{{ account.last_synced_at|longdate }}</time>{% else %}Not yet{% endif %}</dd>
+        <dt>AI transfer</dt><dd>{% if account.ai_consent %}{{ badge("Allowed", "success", "check") }} Selected text may be sent for summaries and embeddings.{% else %}{{ badge("Not allowed", "neutral", "eye-off") }} No message text is sent to an AI provider.{% endif %}</dd>
+        <dt>Disclosure</dt><dd>Version {{ account.disclosure_version or "unknown" }}</dd>
+      </dl>
+      {% if account.connection_state == "reconnect_required" %}
+        <div class="state-actions">{% call state("Gmail needs to be reconnected", "warning", "unplug") %}<p>Mercury's access expired or was revoked. Already-indexed data stays available until you disconnect.</p><a class="btn btn-sm btn-primary" href="{{ url_for('accounts.connect_page') }}">Reconnect Gmail</a>{% endcall %}</div>
+      {% endif %}
+    {% else %}
+      {% call state("No Gmail account is connected", "neutral", "unplug") %}
+        <p>Connect a mailbox to index a bounded, recent window and start organizing.</p>
+        <a class="btn btn-sm btn-primary" href="{{ url_for('accounts.connect_page') }}">Connect Gmail</a>
+      {% endcall %}
+    {% endif %}
+  </section>
+
+  {% if account and label_form is defined %}
+  {% set operator_on = config.GMAIL_LABEL_WRITES_ENABLED %}
+  {% set can_enable = operator_on and config.MAIL_MODE == "gmail" %}
+  <section class="panel" aria-labelledby="labels-heading">
+    <div class="panel-head">
+      <span class="panel-icon">{{ icon("tag") }}</span>
+      <div><h2 class="panel-title" id="labels-heading">Optional Gmail labels</h2><p class="panel-sub">Off by default. Mercury can mirror your buckets as labels it creates and records.</p></div>
+    </div>
+    <div class="settings-section-body">
+      <p>Enabling this asks Google for the broader <code>gmail.modify</code> permission. Mercury uses it only to apply and remove its own labels — it implements no sending, deletion, archiving, or attachment access, and never removes labels you created.</p>
+      {% if label_counts.get("failed") %}
+        {% call state("Some labels failed to sync", "warning", "alert", compact=True) %}<p>{{ label_counts.get("failed") }} label {{ "mapping" if label_counts.get("failed") == 1 else "mappings" }} couldn't be updated in Gmail. Mercury's own organization is unaffected; syncing retries automatically.</p>{% endcall %}
+      {% elif account.label_write_consent and label_counts %}
+        <p>{{ badge("Synced", "success", "check") }} {{ label_counts.get("synced", 0) }} synced · {{ label_counts.get("pending", 0) }} pending</p>
+      {% endif %}
+      {% if not operator_on and not account.label_write_consent %}
+        {% call state("Not available on this Mercury instance", "neutral", "info", compact=True) %}<p>The operator hasn't enabled label writing, so this stays off.</p>{% endcall %}
+      {% elif not can_enable and not account.label_write_consent %}
+        {% call state("Not available with the synthetic mailbox", "neutral", "info", compact=True) %}<p>Label writing needs a real Gmail connection.</p>{% endcall %}
+      {% else %}
+      <form method="post" action="{{ url_for('accounts.label_settings') }}" class="form-stack">
+        {{ label_form.hidden_tag() }}
+        <label class="check-card" for="{{ label_form.enabled.id }}">
+          {{ label_form.enabled(class_="form-check-input") }}
+          <span><span class="check-title">{{ label_form.enabled.label.text }}</span><span class="check-sub">You can turn this off at any time. Existing Mercury labels stay in Gmail unless you remove them there.</span></span>
+        </label>
+        <div class="form-actions"><button class="btn btn-quiet" type="submit">{{ label_form.submit.label.text }}</button></div>
+      </form>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="panel danger-zone" aria-labelledby="danger-heading">
+    <div class="panel-head">
+      <span class="panel-icon">{{ icon("alert") }}</span>
+      <div><h2 class="panel-title" id="danger-heading">Stop processing or leave</h2><p class="panel-sub">These actions take effect immediately and can't be undone.</p></div>
+    </div>
+
+    {% if account %}
+    <div class="danger-block">
+      <h3>Disconnect Gmail</h3>
+      <ul class="consequence-list">
+        <li class="is-removed">{{ icon("x", "icon-sm") }}<span>Stops all processing and revokes Mercury's Google authorization (best effort; you can also revoke it in your Google account).</span></li>
+        <li class="is-removed">{{ icon("x", "icon-sm") }}<span>Removes indexed metadata, summaries, embeddings, buckets, and sender rules for this mailbox.</span></li>
+        <li class="is-kept">{{ icon("check", "icon-sm") }}<span>Gmail messages stay untouched. Labels Mercury created stay in Gmail.</span></li>
+        <li class="is-kept">{{ icon("check", "icon-sm") }}<span>You'll be signed out. Reconnecting later starts a fresh indexing run.</span></li>
+      </ul>
+      <form method="post" action="{{ url_for('accounts.disconnect') }}" data-confirm="Mercury will stop processing and remove this mailbox's indexed metadata, summaries, embeddings, buckets, and rules. Gmail messages are not changed." data-confirm-title="Disconnect Gmail?" data-confirm-label="Disconnect and remove data">
+        {{ disconnect_form.hidden_tag() }}
+        <button class="btn btn-outline-danger" type="submit">{{ icon("unplug", "icon-sm") }} Disconnect and remove mailbox data</button>
+      </form>
+    </div>
+    {% endif %}
+
+    <div class="danger-block">
+      <h3>Delete Mercury account</h3>
+      <ul class="consequence-list">
+        <li class="is-removed">{{ icon("x", "icon-sm") }}<span>Everything under Disconnect, plus your Mercury profile. All sessions end.</span></li>
+        <li class="is-kept">{{ icon("check", "icon-sm") }}<span>Your Gmail account and messages are not affected.</span></li>
+        <li class="is-kept">{{ icon("info", "icon-sm") }}<span>Managed backups may hold deleted records for their bounded retention period; deletions are replayed if a backup is ever restored.</span></li>
+      </ul>
+      <form method="post" action="{{ url_for('accounts.delete_account') }}" novalidate>
+        {{ delete_form.hidden_tag() }}
+        {{ delete_form.confirmation.label(class_="form-label", text="Type DELETE to confirm") }}
+        <div class="confirm-row">
+          {{ delete_form.confirmation(class_="form-control" ~ (" is-invalid" if delete_form.confirmation.errors else ""), autocomplete="off", spellcheck="false", **{"aria-describedby": "delete-hint"}) }}
+          <button class="btn btn-danger" type="submit">{{ icon("trash", "icon-sm") }} {{ delete_form.submit.label.text }}</button>
+        </div>
+        <p class="field-hint" id="delete-hint">Uppercase, exactly as shown.</p>
+      </form>
+    </div>
+  </section>
+</section>
+{% endblock %}

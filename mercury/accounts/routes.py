@@ -151,15 +151,34 @@ def logout():
 @bp.get("/settings")
 @login_required
 def settings():
+    return _render_settings(ConfirmDeleteForm())
+
+
+def _label_sync_counts() -> dict[str, int]:
+    """Owner-scoped label mapping status counts for display; no mailbox content."""
+    from sqlalchemy import func, select
+
+    from mercury.buckets.models import GmailLabelMapping
+
+    rows = db.session.execute(
+        select(GmailLabelMapping.sync_status, func.count())
+        .where(GmailLabelMapping.user_id == current_user.id)
+        .group_by(GmailLabelMapping.sync_status)
+    ).all()
+    return {status: count for status, count in rows}
+
+
+def _render_settings(delete_form, status: int = 200):
     label_form = LabelSyncForm()
     if current_user.gmail_account:
         label_form.enabled.data = current_user.gmail_account.label_write_consent
     return render_template(
         "accounts/settings.html",
         disconnect_form=EmptyForm(),
-        delete_form=ConfirmDeleteForm(),
+        delete_form=delete_form,
         label_form=label_form,
-    )
+        label_counts=_label_sync_counts() if current_user.gmail_account else {},
+    ), status
 
 
 @bp.post("/settings/labels")
@@ -206,9 +225,7 @@ def delete_account():
     form = ConfirmDeleteForm()
     if not form.validate_on_submit() or form.confirmation.data != "DELETE":
         flash("Type DELETE exactly to confirm.", "danger")
-        return render_template(
-            "accounts/settings.html", disconnect_form=EmptyForm(), delete_form=form
-        ), 400
+        return _render_settings(form, 400)
     delete_user_account(current_user)
     logout_user()
     session.clear()

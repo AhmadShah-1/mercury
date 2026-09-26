@@ -1,6 +1,50 @@
-{% extends "base.html" %}{% block title %}Privacy — Mercury{% endblock %}
-{% block content %}<article class="document"><h1>Privacy</h1>
-<p>Mercury stores selected Gmail metadata, message references, summaries, organization choices, and embeddings while an account is connected. OAuth credentials are encrypted. Full message bodies and raw MIME are processed transiently and are not stored in the application database or job payloads.</p>
-<p>When AI processing is enabled, bounded selected text is sent to the configured OpenAI API project for summaries and embeddings. API retention and abuse-monitoring rules still apply; Mercury does not claim zero retention by every processor.</p>
-<p>Disconnecting removes the connected mailbox's tokens and derived data. Account deletion also removes the Mercury profile. Managed backups may retain deleted records for their bounded retention period.</p></article>{% endblock %}
+{% extends "base.html" %}
+{% from "components/icons.html" import icon %}
+{% block title %}Privacy — Mercury{% endblock %}
+{% block content %}
+<article class="doc">
+  <div class="doc-card">
+    <p class="eyebrow">Privacy</p>
+    <h1>How Mercury handles your mail</h1>
+    <p class="lead-m">Mercury keeps the information needed to organize your inbox. Full message bodies are fetched when needed rather than retained in Mercury's database. AI processing and provider retention are explained before connection.</p>
+    <ul class="doc-toc" role="list">
+      <li><a href="#stored">What's stored</a></li>
+      <li><a href="#ai">AI processing</a></li>
+      <li><a href="#retention">Retention</a></li>
+      <li><a href="#leaving">Disconnect &amp; deletion</a></li>
+      <li><a href="#limits">What we don't claim</a></li>
+    </ul>
 
+    <h2 id="stored">What Mercury stores</h2>
+    <p>Mercury stores selected Gmail metadata, message references, summaries, organization choices, and embeddings while an account is connected. OAuth credentials are encrypted. Full message bodies and raw MIME are processed transiently and are not stored in the application database or job payloads.</p>
+    <p>Email text you open in Mercury is shown as escaped plain text. Remote images aren't loaded, and email content isn't written to your browser's storage. A theme preference is the only thing Mercury saves in your browser.</p>
+
+    <h2 id="ai">AI processing</h2>
+    <p>When AI processing is enabled and you allowed it, bounded selected text is sent to the configured OpenAI API project for summaries and embeddings. Requests are stateless with response storage disabled, and the model has no tools or browsing. API retention and abuse-monitoring rules still apply; Mercury does not claim zero retention by every processor.</p>
+    <p>If you declined AI transfer, no message text is sent to an embedding or summary endpoint.</p>
+
+    <h2 id="retention">Retention</h2>
+    <div class="table-wrap">
+      <table class="table-m">
+        <thead><tr><th scope="col">Data</th><th scope="col">Policy</th></tr></thead>
+        <tbody>
+          <tr><td>Full bodies, raw HTML/MIME, attachments</td><td>Processed transiently; not stored in the database, queue, files, browser storage, or logs.</td></tr>
+          <tr><td>Selected metadata, summaries, embeddings, rules</td><td>Kept while connected and needed for the feature; removed on disconnect or deletion.</td></tr>
+          <tr><td>Google authorization tokens</td><td>Encrypted while connected; removed on disconnect or deletion.</td></tr>
+          <tr><td>Operational logs</td><td>Short retention, initially seven days. Content and credentials are excluded.</td></tr>
+          <tr><td>Security and deletion audit</td><td>Minimal records, initially 30 days, without email content.</td></tr>
+          <tr><td>Managed database backups</td><td>Bounded retention, initially seven days where supported. Not instantly erased.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 id="leaving">Disconnect and deletion</h2>
+    <p>Disconnecting removes the connected mailbox's tokens and derived data. Account deletion also removes the Mercury profile. Managed backups may retain deleted records for their bounded retention period; if a backup is restored, recorded deletions are replayed before it's used.</p>
+    <p>Mercury never deletes your Gmail messages or labels you created. Labels Mercury created (only if you enabled label sync) are left in Gmail.</p>
+
+    <h2 id="limits">What Mercury doesn't claim</h2>
+    <p>Mercury is not end-to-end encrypted or zero-knowledge, and it isn't a product that stores no email-derived data. Passing automated tests is not Google approval or a security certification.</p>
+    {% if config.SUPPORT_EMAIL %}<p>Questions? Contact <a href="mailto:{{ config.SUPPORT_EMAIL }}">{{ config.SUPPORT_EMAIL }}</a>.</p>{% endif %}
+  </div>
+</article>
+{% endblock %}

@@ -1,2 +1,40 @@
-{% extends "base.html" %}{% block title %}Operations — Mercury{% endblock %}{% block content %}<section class="document"><h1>Operations</h1><p>This panel intentionally has no mailbox reader, subject, summary, token, or impersonation view.</p><dl>{% for key, value in metrics.items() %}<dt>{{ key|replace('_', ' ') }}</dt><dd>{{ value }}</dd>{% endfor %}</dl><table><thead><tr><th>Run ID</th><th>Kind</th><th>Status</th><th>Counts</th><th>Error</th></tr></thead><tbody>{% for run in recent_runs %}<tr><td>{{ run.id }}</td><td>{{ run.kind }}</td><td>{{ run.status }}</td><td>{{ run.completed_count }}/{{ run.found_count }}</td><td>{{ run.safe_error_code or '' }}</td></tr>{% endfor %}</tbody></table></section>{% endblock %}
-
+{% extends "base.html" %}
+{% from "components/icons.html" import icon %}
+{% from "components/ui.html" import badge %}
+{% block title %}Operations — Mercury{% endblock %}
+{% block content %}
+<section class="wide-page">
+  <header class="page-head">
+    <p class="eyebrow">Operations</p>
+    <h1 class="page-title">Service health</h1>
+    <p class="lead-m">This panel intentionally has no mailbox reader, subject, summary, token, or impersonation view.</p>
+  </header>
+  <ul class="metric-grid" role="list">
+    {% for key, value in metrics.items() %}
+    <li class="metric"><span class="metric-num">{{ value }}</span><span class="metric-label">{{ key|replace('_', ' ') }}</span></li>
+    {% endfor %}
+  </ul>
+  <div class="panel">
+    <h2 class="panel-title">Recent processing runs</h2>
+    <p class="panel-sub">Counts and safe error codes only.</p>
+    <div class="table-wrap">
+      <table class="table-m">
+        <thead><tr><th scope="col">Run ID</th><th scope="col">Kind</th><th scope="col">Status</th><th scope="col">Counts</th><th scope="col">Error</th></tr></thead>
+        <tbody>
+          {% for run in recent_runs %}
+          <tr>
+            <td class="mono">{{ run.id }}</td>
+            <td>{{ run.kind }}</td>
+            <td>{% if run.status == "succeeded" %}{{ badge("Succeeded", "success", "check") }}{% elif run.status in ["pending", "running"] %}{{ badge(run.status|capitalize, "unread", "activity") }}{% elif run.status == "failed" %}{{ badge("Failed", "danger", "x") }}{% else %}{{ badge(run.status, "neutral") }}{% endif %}</td>
+            <td class="mono">{{ run.completed_count }}/{{ run.found_count }}</td>
+            <td class="mono">{{ run.safe_error_code or '' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5">No runs yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

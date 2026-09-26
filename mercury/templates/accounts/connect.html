@@ -1,6 +1,81 @@
-{% extends "base.html" %}{% block title %}Connect Gmail — Mercury{% endblock %}
-{% block content %}<section class="card-form"><h1>Connect Gmail</h1>
-<p>Mercury reads a bounded recent window, retains selected metadata and derived organization, and fetches bodies when you open or analyze a thread. It does not send mail, retrieve attachments, or delete/archive messages.</p>
-<p>{% if config.AI_PROVIDER == 'fake' %}The synthetic AI stays offline and produces clearly marked fixture output.{% else %}When enabled, selected message text is sent to OpenAI for summaries and embeddings.{% endif %}</p>
-<form method="post" action="{{ url_for('accounts.gmail_start') }}">{{ form.hidden_tag() }}<div class="form-check">{{ form.accept_disclosure(class_='form-check-input') }} {{ form.accept_disclosure.label }}</div><div class="form-check">{{ form.ai_consent(class_='form-check-input') }} {{ form.ai_consent.label }}</div>{{ form.submit(class_='btn btn-primary') }}</form></section>{% endblock %}
+{% extends "base.html" %}
+{% from "components/icons.html" import icon %}
+{% block title %}Connect Gmail — Mercury{% endblock %}
+{% block content %}
+{% set fake = config.MAIL_MODE == "fake" %}
+<section class="wide-page">
+  <header class="page-head">
+    <p class="eyebrow">Before you connect</p>
+    <h1 class="page-title">Here's exactly what Mercury does with Gmail</h1>
+    <p class="lead-m">Mercury organizes a bounded, recent part of your mailbox. Gmail stays the source of truth for messages, labels, and unread state. Nothing is connected until you confirm below.</p>
+  </header>
 
+  {% if fake %}
+  <div class="state state-info">
+    <span class="state-icon">{{ icon("bolt") }}</span>
+    <div class="state-body"><p class="state-title">Synthetic demo mode</p><p>This environment connects an invented mailbox. No Google account is contacted and no real mail is read.</p></div>
+  </div>
+  {% endif %}
+
+  <div class="disclosure-grid">
+    <article class="disc-card">
+      <h2><span class="chip-icon">{{ icon("eye", "icon-sm") }}</span>What Mercury reads</h2>
+      <ul class="tick-list is-neutral">
+        <li>{{ icon("check", "icon-sm") }}<span>Up to {{ "{:,}".format(config.INDEX_MAX_THREADS) }} recently active conversations from the last {{ config.INDEX_LOOKBACK_DAYS }} days — not your whole mailbox.</span></li>
+        <li>{{ icon("check", "icon-sm") }}<span>Message text when you open a conversation, or when preparing a summary.</span></li>
+        <li>{{ icon("check", "icon-sm") }}<span>Read-only Gmail access{% if not fake %} (<code>gmail.readonly</code>){% endif %}. Label writing is a separate, optional step.</span></li>
+      </ul>
+    </article>
+    <article class="disc-card">
+      <h2><span class="chip-icon">{{ icon("database", "icon-sm") }}</span>What Mercury keeps</h2>
+      <ul class="tick-list is-neutral">
+        <li>{{ icon("check", "icon-sm") }}<span>Selected metadata: senders, recipients, subjects, dates, labels, message IDs, and Gmail's short preview.</span></li>
+        <li>{{ icon("check", "icon-sm") }}<span>Derived data: summaries, possible actions, embeddings, your buckets and rules.</span></li>
+        <li>{{ icon("lock", "icon-sm") }}<span>Google authorization, encrypted. Full message bodies are fetched when needed rather than retained in Mercury's database.</span></li>
+      </ul>
+    </article>
+    <article class="disc-card">
+      <h2><span class="chip-icon">{{ icon("sparkle", "icon-sm") }}</span>What goes to the AI provider</h2>
+      {% if config.AI_PROVIDER == "fake" %}
+        <p>In this demo the AI is synthetic and offline; fixture output is clearly marked.</p>
+      {% else %}
+        <p>Only if you allow it below: bounded, selected message text is sent to OpenAI for summaries and embeddings, with response storage disabled. The provider's abuse-monitoring retention still applies.</p>
+      {% endif %}
+      <p>If you don't allow it, no message text is sent. You still get buckets you create, sender rules, and the reader.</p>
+    </article>
+    <article class="disc-card">
+      <h2><span class="chip-icon">{{ icon("ban", "icon-sm") }}</span>What Mercury never does</h2>
+      <ul class="tick-list is-never">
+        <li>{{ icon("x", "icon-sm") }}<span>Send, draft, or reply to email.</span></li>
+        <li>{{ icon("x", "icon-sm") }}<span>Delete, archive, or trash Gmail messages.</span></li>
+        <li>{{ icon("x", "icon-sm") }}<span>Download or preview attachments.</span></li>
+        <li>{{ icon("x", "icon-sm") }}<span>Change Gmail's unread state.</span></li>
+      </ul>
+    </article>
+  </div>
+
+  <div class="consent-card">
+    <h2>Connect when you're ready</h2>
+    <p class="muted-m">You can stop at any time: <strong>Disconnect</strong> in Settings stops processing and removes Mercury's derived data for this mailbox.</p>
+    <form class="form-stack" method="post" action="{{ url_for('accounts.gmail_start') }}" novalidate>
+      {{ form.hidden_tag() }}
+      <label class="check-card" for="{{ form.accept_disclosure.id }}">
+        {{ form.accept_disclosure(class_="form-check-input", required=True) }}
+        <span><span class="check-title">{{ form.accept_disclosure.label.text }}<span class="required-tag">Required</span></span>
+        <span class="check-sub">Metadata and derived organization are kept while connected; bodies are processed transiently.</span></span>
+      </label>
+      {% for error in form.accept_disclosure.errors %}<p class="field-error" role="alert">Please confirm you've read how Mercury processes mailbox data.</p>{% endfor %}
+      <label class="check-card" for="{{ form.ai_consent.id }}">
+        {{ form.ai_consent(class_="form-check-input") }}
+        <span><span class="check-title">{{ form.ai_consent.label.text }}<span class="optional-tag">Optional</span></span>
+        <span class="check-sub">Enables AI summaries, possible-action hints, and category suggestions. Leave unchecked for manual organization only.</span></span>
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-primary btn-lg" type="submit">{{ icon("mail", "icon-sm") }} {{ "Connect synthetic mailbox" if fake else "Continue to Google" }}</button>
+        <a class="btn btn-ghost" href="{{ url_for('public.privacy') }}">Read the privacy details</a>
+      </div>
+    </form>
+    <p class="fine-print">Disclosure version 2026-09-v1. {% if not fake %}Google will show its own consent screen next; Mercury receives only the access you approve there.{% endif %} Mercury doesn't claim Google verification or security certification.</p>
+  </div>
+</section>
+{% endblock %}

@@ -1,2 +1,19 @@
-{% extends "base.html" %}{% block title %}Error {{ code }} — Mercury{% endblock %}{% block content %}<section class="empty-state"><h1>{% if code == 404 %}Not found{% elif code == 401 %}Sign in required{% elif code == 400 %}Invalid request{% else %}Something went wrong{% endif %}</h1><p>The request could not be completed. No provider details or private content are shown here.</p><a href="{{ url_for('public.index') }}">Return home</a></section>{% endblock %}
-
+{% extends "base.html" %}
+{% from "components/icons.html" import icon %}
+{% block title %}Error {{ code }} — Mercury{% endblock %}
+{% block content %}
+{% set titles = {400: "That request didn't look right", 401: "Please sign in", 403: "That isn't allowed", 404: "We couldn't find that", 409: "That can't be done right now", 500: "Something went wrong", 503: "Temporarily unavailable"} %}
+<section class="error-page">
+  <div>
+    <p class="error-code" aria-hidden="true">{{ code }}</p>
+    <h1>{{ titles.get(code, "Something went wrong") }}</h1>
+    <p>{% if code == 401 %}Your session ended or you need to sign in to continue.{% elif code == 404 %}It may have moved, been removed, or belong to a different account.{% else %}The request could not be completed.{% endif %} No provider details or private content are shown here.</p>
+    <div class="error-actions">
+      {% if current_user.is_authenticated %}
+        <a class="btn btn-primary" href="{{ url_for('inbox.workspace') }}">{{ icon("inbox", "icon-sm") }} Back to workspace</a>
+      {% endif %}
+      <a class="btn btn-quiet" href="{{ url_for('public.index') }}">Return home</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,2 +1,18 @@
-{% extends "base.html" %}{% block title %}Processing — Mercury{% endblock %}{% block content %}<section class="card-form"><h1>Mailbox processing</h1><p>Status: {{ run.status }}</p><p>Stage: {{ run.stage }}</p><p>Indexed {{ run.completed_count }} of {{ run.found_count }} discovered conversations.</p>{% if run.safe_error_code %}<p class="alert alert-warning">Processing paused: {{ run.safe_error_code }}</p>{% endif %}{% if run.status == 'succeeded' %}<a class="btn btn-primary" href="{{ url_for('inbox.workspace') }}">Open workspace</a>{% else %}<p>It is safe to leave this page; processing is durable.</p>{% endif %}</section>{% endblock %}
-
+{% extends "base.html" %}
+{% from "components/brand.html" import mark %}
+{% block title %}Processing — Mercury{% endblock %}
+{% block content %}
+<section class="narrow-page">
+  <div class="panel progress-card">
+    <div class="progress-hero">
+      <div class="progress-mark{% if polling %} is-live{% endif %}" aria-hidden="true">{{ mark(56, "progress") }}</div>
+      <div>
+        <p class="eyebrow">{{ "Initial indexing" if run.kind == "initial" else "Mailbox sync" }}</p>
+        <h1 class="page-title">Organizing your mailbox</h1>
+        <p class="muted-m">Mercury reports measured progress, not time estimates.</p>
+      </div>
+    </div>
+    {% include "inbox/_progress.html" %}
+  </div>
+</section>
+{% endblock %}

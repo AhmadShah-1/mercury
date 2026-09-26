@@ -20,6 +20,9 @@ param postgresPassword string
 
 param postgresAdmin string = 'mercuryadmin'
 
+@description('Hostname of APP_BASE_URL (for example app.example.com). Probes send it as Host because Mercury rejects untrusted Host headers.')
+param appHostname string
+
 resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: '${name}-vnet'
   location: location
@@ -122,6 +125,7 @@ resource mercuryDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@20
   }
 }
 
+// Allow-list pgvector; the application migration then runs CREATE EXTENSION vector.
 resource postgresExtensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
   parent: postgres
   name: 'azure.extensions'
@@ -129,9 +133,15 @@ resource postgresExtensions 'Microsoft.DBforPostgreSQL/flexibleServers/configura
     source: 'user-override'
     value: 'VECTOR'
   }
+  // Server-level operations are serialized to avoid ServerIsBusy conflicts.
+  dependsOn: [
+    mercuryDatabase
+  ]
 }
 
-resource registry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = {
+// Basic tier: no admin user; untagged-manifest retention policies require Premium, so old
+// digests are pruned by the documented operations procedure instead.
+resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: registryName
   location: location
   sku: {
@@ -140,12 +150,6 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = 
   properties: {
     adminUserEnabled: false
     publicNetworkAccess: 'Enabled'
-    policies: {
-      retentionPolicy: {
-        days: 7
-        status: 'enabled'
-      }
-    }
   }
 }
 
@@ -154,8 +158,9 @@ resource pullIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-
   location: location
 }
 
+// Built-in AcrPull role.
 var acrPullRoleDefinitionId = subscriptionResourceId(
-  'Microsoft.Authorization/roleDefinitions'
+  'Microsoft.Authorization/roleDefinitions',
   '7f951dda-4ed3-4680-a7ca-43fe172d538d'
 )
 
@@ -173,12 +178,26 @@ resource containerEnvironment 'Microsoft.App/managedEnvironments@2025-01-01' = {
   name: '${name}-environment'
   location: location
   properties: {
+    // A workload-profiles environment is required for a subnet delegated to Microsoft.App.
+    workloadProfiles: [
+      {
+        name: 'Consumption'
+        workloadProfileType: 'Consumption'
+      }
+    ]
     vnetConfiguration: {
       infrastructureSubnetId: appsSubnet.id
       internal: false
     }
   }
 }
+
+var probeHeaders = [
+  {
+    name: 'Host'
+    value: appHostname
+  }
+]
 
 var commonSecrets = [
   {
@@ -216,6 +235,7 @@ resource web 'Microsoft.App/containerApps@2025-01-01' = {
   }
   properties: {
     managedEnvironmentId: containerEnvironment.id
+    workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
       ingress: {
@@ -244,6 +264,7 @@ resource web 'Microsoft.App/containerApps@2025-01-01' = {
                 path: '/health/live'
                 port: 8000
                 scheme: 'HTTP'
+                httpHeaders: probeHeaders
               }
               initialDelaySeconds: 10
               periodSeconds: 30
@@ -254,6 +275,7 @@ resource web 'Microsoft.App/containerApps@2025-01-01' = {
                 path: '/health/ready'
                 port: 8000
                 scheme: 'HTTP'
+                httpHeaders: probeHeaders
               }
               initialDelaySeconds: 10
               periodSeconds: 15
@@ -293,6 +315,7 @@ resource worker 'Microsoft.App/containerApps@2025-01-01' = {
   }
   properties: {
     managedEnvironmentId: containerEnvironment.id
+    workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
       registries: registryConfiguration
@@ -303,10 +326,9 @@ resource worker 'Microsoft.App/containerApps@2025-01-01' = {
         {
           name: 'worker'
           image: image
-          command: [
-            'python'
-          ]
+          // Override only CMD; the image ENTRYPOINT performs fail-closed Doppler injection.
           args: [
+            'python'
             '-m'
             'mercury.jobs.worker'
           ]
@@ -339,6 +361,7 @@ resource migrationJob 'Microsoft.App/jobs@2025-01-01' = {
   }
   properties: {
     environmentId: containerEnvironment.id
+    workloadProfileName: 'Consumption'
     configuration: {
       triggerType: 'Manual'
       replicaTimeout: 1800
@@ -361,7 +384,7 @@ resource migrationJob 'Microsoft.App/jobs@2025-01-01' = {
           args: [
             '/bin/sh'
             '-c'
-            'flask --app wsgi:app db upgrade && procrastinate --app=mercury.jobs.cli.app schema --apply'
+            'flask --app wsgi:app db upgrade && flask --app wsgi:app queue-schema'
           ]
           env: commonEnv
           resources: {

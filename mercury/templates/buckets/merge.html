@@ -1,2 +1,45 @@
-{% extends "base.html" %}{% block title %}Merge {{ source.name }} — Mercury{% endblock %}{% block content %}<section class="card-form"><h1>Merge {{ source.name }}</h1><p>This will move {{ affected }} thread assignments and matching sender rules. Gmail messages are not changed.</p><form method="post">{{ form.hidden_tag() }}{{ form.destination_id.label }}{{ form.destination_id(class_='form-select') }}<div class="form-check">{{ form.confirm(class_='form-check-input') }} {{ form.confirm.label }}</div>{{ form.submit(class_='btn btn-danger') }} <a href="{{ url_for('inbox.bucket_workspace', bucket_id=source.id) }}">Cancel</a></form></section>{% endblock %}
-
+{% extends "base.html" %}
+{% from "components/icons.html" import icon %}
+{% from "components/ui.html" import badge, state %}
+{% block title %}Merge {{ source.name }} — Mercury{% endblock %}
+{% block content %}
+<section class="narrow-page">
+  <a class="back-link page-back" href="{{ url_for('inbox.bucket_workspace', bucket_id=source.id) }}">{{ icon("arrow-left", "icon-sm") }} Back to {{ source.name }}</a>
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-icon">{{ icon("merge") }}</span>
+      <div>
+        <p class="eyebrow">Review before merging</p>
+        <h1 class="panel-title">Merge “{{ source.name }}”</h1>
+        <p class="panel-sub">Choose where its conversations should go.</p>
+      </div>
+    </div>
+    {% if form.destination_id.choices %}
+    {% call state("This will move " ~ affected ~ (" thread" if affected == 1 else " threads") ~ " and matching sender rules", "info", "info") %}
+      <p>{{ source.name }} is then archived. Manual placements are preserved, and Gmail messages are not changed.</p>
+    {% endcall %}
+    <form class="form-stack" method="post" novalidate>
+      {{ form.hidden_tag() }}
+      <div>
+        {{ form.destination_id.label(class_="form-label") }}
+        {{ form.destination_id(class_="form-select") }}
+      </div>
+      <label class="check-card" for="{{ form.confirm.id }}">
+        {{ form.confirm(class_="form-check-input") }}
+        <span><span class="check-title">{{ form.confirm.label.text }}</span><span class="check-sub">{{ affected }} {{ "thread assignment" if affected == 1 else "thread assignments" }} will change.</span></span>
+      </label>
+      {% if form.confirm.errors %}<p class="field-error" role="alert">Tick the box to confirm you've reviewed the affected count.</p>{% endif %}
+      <div class="form-actions">
+        <button class="btn btn-danger" type="submit">{{ icon("merge", "icon-sm") }} {{ form.submit.label.text }}</button>
+        <a class="btn btn-ghost" href="{{ url_for('inbox.bucket_workspace', bucket_id=source.id) }}">Cancel</a>
+      </div>
+    </form>
+    {% else %}
+    {% call state("There's no other bucket to merge into", "neutral", "folder") %}
+      <p>Create another bucket first, then come back to merge.</p>
+      <a class="btn btn-sm btn-primary" href="{{ url_for('buckets.create') }}">Create bucket</a>
+    {% endcall %}
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -1,7 +1,7 @@
 name: mercury
 services:
   db:
-    image: pgvector/pgvector:0.8.2-pg17-bookworm
+    image: pgvector/pgvector:0.8.2-pg17-bookworm@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966
     environment:
       POSTGRES_DB: mercury
       POSTGRES_USER: mercury
@@ -79,7 +79,7 @@ services:
         condition: service_healthy
   test-db:
     profiles: ["test"]
-    image: pgvector/pgvector:0.8.2-pg17-bookworm
+    image: pgvector/pgvector:0.8.2-pg17-bookworm@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966
     environment:
       POSTGRES_DB: mercury_test
       POSTGRES_USER: mercury

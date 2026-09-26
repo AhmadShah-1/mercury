@@ -1,2 +1,57 @@
-{% extends "base.html" %}{% block title %}{{ title }} — Mercury{% endblock %}{% block content %}<section class="card-form"><h1>{{ title }}</h1><form method="post">{{ form.hidden_tag() }}{{ form.name.label }}{{ form.name(class_='form-control') }}{{ form.purpose.label }}{{ form.purpose(class_='form-control') }}{{ form.submit(class_='btn btn-primary') }}</form>{% if bucket %}<p><a href="{{ url_for('buckets.merge', bucket_id=bucket.id) }}">Merge this bucket</a></p><form method="post" action="{{ url_for('buckets.archive', bucket_id=bucket.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-outline-danger" type="submit">Archive bucket</button></form>{% endif %}</section>{% endblock %}
+{% extends "base.html" %}
+{% from "components/icons.html" import icon %}
+{% block title %}{{ title }} — Mercury{% endblock %}
+{% block content %}
+<section class="narrow-page">
+  <a class="back-link page-back" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) if bucket else url_for('inbox.workspace') }}">{{ icon("arrow-left", "icon-sm") }} Back to {{ bucket.name if bucket else "workspace" }}</a>
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-icon">{{ icon("pencil" if bucket else "folder") }}</span>
+      <div>
+        <h1 class="panel-title">{{ title }}</h1>
+        <p class="panel-sub">{% if bucket %}Renaming keeps this bucket's identity and conversations. Mercury never renames a bucket you've named.{% else %}Create a destination, then move conversations into it — this is also how you split a bucket.{% endif %}</p>
+      </div>
+    </div>
+    <form class="form-stack" method="post" novalidate>
+      {{ form.hidden_tag() }}
+      <div>
+        {{ form.name.label(class_="form-label") }}
+        {{ form.name(class_="form-control" ~ (" is-invalid" if form.name.errors else ""), maxlength=80, autocomplete="off", required=True) }}
+        {% for error in form.name.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      </div>
+      <div>
+        {{ form.purpose.label(class_="form-label") }} <span class="optional-tag">Optional</span>
+        {{ form.purpose(class_="form-control" ~ (" is-invalid" if form.purpose.errors else ""), maxlength=240, autocomplete="off", placeholder="e.g. Receipts and order updates", **{"aria-describedby": "purpose-hint"}) }}
+        <p class="field-hint" id="purpose-hint">A short description shown under the bucket title. Up to 240 characters.</p>
+        {% for error in form.purpose.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">{{ icon("check", "icon-sm") }} {{ form.submit.label.text }}</button>
+        <a class="btn btn-ghost" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) if bucket else url_for('inbox.workspace') }}">Cancel</a>
+      </div>
+    </form>
+  </div>
 
+  {% if bucket %}
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-icon">{{ icon("merge") }}</span>
+      <div><h2 class="panel-title">Combine or retire</h2><p class="panel-sub">Neither option deletes Gmail messages or labels.</p></div>
+    </div>
+    <div class="danger-block">
+      <h3>Merge into another bucket</h3>
+      <p class="muted-m">Moves this bucket's conversations and sender rules to another bucket, after showing how many will change.</p>
+      <a class="btn btn-quiet" href="{{ url_for('buckets.merge', bucket_id=bucket.id) }}">{{ icon("merge", "icon-sm") }} Review merge</a>
+    </div>
+    <div class="danger-block">
+      <h3>Archive bucket</h3>
+      <p class="muted-m">Hides it from navigation. Conversations keep their history; nothing changes in Gmail.</p>
+      <form method="post" action="{{ url_for('buckets.archive', bucket_id=bucket.id) }}" data-confirm="This hides the bucket from navigation. Gmail messages and labels are not deleted." data-confirm-title="Archive this bucket?" data-confirm-label="Archive bucket">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-outline-danger" type="submit">{{ icon("eye-off", "icon-sm") }} Archive bucket</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

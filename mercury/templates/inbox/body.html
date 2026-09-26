@@ -1,2 +1,39 @@
-{% for message in view.messages %}<article class="message"><header><strong>{{ message.sender_name }}</strong> &lt;{{ message.sender_address }}&gt;<br><time>{{ message.sent_at.strftime('%Y-%m-%d %H:%M %Z') }}</time></header><pre>{{ message.text }}</pre>{% if message.truncated %}<p class="notice">This message was truncated. Open it in Gmail for the complete original.</p>{% endif %}{% if message.attachment_present %}<p class="notice">Attachments are available in Gmail.</p>{% endif %}</article>{% else %}<p>No supported readable text was available. Open the message in Gmail.</p>{% endfor %}
-
+{#- Original message text from Gmail, fetched on demand and never stored. Newest first.
+    Text is autoescaped and shown as preformatted plain text; no email HTML is rendered. -#}
+{% from "components/icons.html" import icon %}
+{% macro message_block(message, latest) %}
+<header class="message-head">
+  <span class="avatar" aria-hidden="true">{{ (message.sender_name or message.sender_address or "?")[:1]|upper }}</span>
+  <div class="message-who">
+    <p class="message-from"><span class="person">{{ message.sender_name or message.sender_address }}</span>{% if message.sender_name %} <span class="addr">&lt;{{ message.sender_address }}&gt;</span>{% endif %}</p>
+    {% if message.recipients %}<p class="message-to">To {{ message.recipients[:4]|join(", ") }}{% if message.recipients|length > 4 %} and {{ message.recipients|length - 4 }} more{% endif %}</p>{% endif %}
+  </div>
+  <time class="message-time" datetime="{{ message.sent_at.isoformat() }}" data-localtime="long">{{ message.sent_at.strftime('%Y-%m-%d %H:%M %Z') }}</time>
+</header>
+<div class="message-text">{{ message.text }}</div>
+{% if message.truncated %}<p class="message-note">{{ icon("info", "icon-xs") }} This message was shortened for the reader. Open in Gmail for the complete original.</p>{% endif %}
+{% if message.attachment_present %}<p class="message-note">{{ icon("paperclip", "icon-xs") }} Attachments are available in Gmail.</p>{% endif %}
+{% endmacro %}
+{% set messages = view.messages %}
+{% if messages %}
+<p class="messages-count">{{ messages|length }} {{ "message" if messages|length == 1 else "messages" }} shown</p>
+<article class="message message-latest" aria-label="Latest message">
+  {{ message_block(messages[0], True) }}
+</article>
+{% if messages|length > 1 %}
+<div class="earlier">
+  <p class="earlier-label">Earlier messages · {{ messages|length - 1 }}</p>
+  {% for message in messages[1:] %}
+  <details class="message message-earlier">
+    <summary><span class="earlier-chevron">{{ icon("chevron-right", "icon-sm") }}</span><span class="person">{{ message.sender_name or message.sender_address }}</span><time datetime="{{ message.sent_at.isoformat() }}" data-localtime="short">{{ message.sent_at.strftime('%b %d, %H:%M') }}</time></summary>
+    {{ message_block(message, False) }}
+  </details>
+  {% endfor %}
+</div>
+{% endif %}
+{% else %}
+<div class="state state-neutral">
+  <span class="state-icon">{{ icon("file-x") }}</span>
+  <div class="state-body"><p class="state-title">No readable text available</p><p>This conversation has no supported plain-text content. Open it in Gmail to see the original.</p></div>
+</div>
+{% endif %}

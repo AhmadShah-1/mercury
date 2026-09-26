@@ -1,0 +1,75 @@
+{#- Live processing status. Polls only while the run is active and inside the polling window;
+    a finished, failed, or overdue run renders without hx-trigger, which stops polling. -#}
+{% from "components/icons.html" import icon %}
+{% from "components/ui.html" import state %}
+{% set failed = run.status == "failed" or run.safe_error_code %}
+{% set done = run.status == "succeeded" %}
+{% set indexing = run.stage in ["indexing", "synchronizing"] or done %}
+{% set found_step = "done" if (indexing or run.found_count) else ("failed" if failed else "active") %}
+{% set index_step = "done" if done else ("failed" if failed and found_step == "done" else ("active" if indexing else "todo")) %}
+{% set prepare_step = "active" if done else "todo" %}
+<div class="progress-panel" id="run-progress" data-run-status="{{ run.status }}"
+  {%- if polling %} hx-get="{{ url_for('inbox.run_status', run_id=run.id) }}" hx-trigger="every {{ '10s' if slow else '2s' }}" hx-swap="outerHTML"{% endif %}>
+  <ol class="stepper" role="list">
+    <li class="step step-{{ found_step }}">
+      <span class="step-dot">{% if found_step == "done" %}{{ icon("check", "icon-sm") }}{% elif found_step == "failed" %}{{ icon("x", "icon-sm") }}{% else %}<span class="step-pulse"></span>{% endif %}</span>
+      <div class="step-body">
+        <p class="step-title">{% if found_step == "done" %}Found {{ run.found_count }} {{ "conversation" if run.found_count == 1 else "conversations" }}{% else %}Finding conversations{% endif %}</p>
+        <p class="step-sub">{% if run.stage == "recovered_after_stall" %}Resumed after an interruption. {% endif %}Up to {{ "{:,}".format(run.requested_limit) }} recently active conversations from the last {{ config.INDEX_LOOKBACK_DAYS }} days.</p>
+      </div>
+      <span class="visually-hidden">{{ {"done": "Complete", "active": "In progress", "failed": "Stopped", "todo": "Not started"}[found_step] }}</span>
+    </li>
+    <li class="step step-{{ index_step }}">
+      <span class="step-dot">{% if index_step == "done" %}{{ icon("check", "icon-sm") }}{% elif index_step == "failed" %}{{ icon("x", "icon-sm") }}{% elif index_step == "active" %}<span class="step-pulse"></span>{% endif %}</span>
+      <div class="step-body">
+        <p class="step-title">Indexed {{ run.completed_count }} {{ "conversation" if run.completed_count == 1 else "conversations" }}</p>
+        {% if run.found_count %}
+        <progress class="meter" value="{{ run.completed_count }}" max="{{ run.found_count }}" aria-label="Conversations indexed">{{ run.completed_count }} of {{ run.found_count }}</progress>
+        <p class="step-sub">{{ run.completed_count }} of {{ run.found_count }} found{% if run.stage == "synchronizing" %} · checking for changes{% endif %}</p>
+        {% else %}
+        <p class="step-sub">Metadata only: senders, subjects, dates, and labels.</p>
+        {% endif %}
+      </div>
+      <span class="visually-hidden">{{ {"done": "Complete", "active": "In progress", "failed": "Stopped", "todo": "Not started"}[index_step] }}</span>
+    </li>
+    <li class="step step-{{ prepare_step }}">
+      <span class="step-dot">{% if prepare_step == "active" %}{{ icon("sparkle", "icon-sm") }}{% endif %}</span>
+      <div class="step-body">
+        <p class="step-title">Preparing category suggestions</p>
+        <p class="step-sub">{% if done %}Suggestions and summaries continue in the background. You can start browsing now.{% else %}Starts once indexing finishes.{% endif %}</p>
+      </div>
+      <span class="visually-hidden">{{ "In progress" if prepare_step == "active" else "Not started" }}</span>
+    </li>
+  </ol>
+
+  <div class="progress-foot" role="status">
+    {% if failed %}
+      {% call state("Processing paused", "warning", "pause") %}
+        {% set reasons = {"provider_rate_limited": "Gmail asked Mercury to slow down.", "provider_timeout": "Gmail didn't respond in time.", "provider_unavailable": "Gmail was temporarily unavailable.", "connection_needs_reauthorization": "Mercury's Gmail access needs to be renewed.", "budget_exceeded": "The AI budget for this period was reached."} %}
+        <p>{{ reasons.get(run.safe_error_code, "The run stopped before finishing.") }} Conversations indexed before the pause remain available.</p>
+        <p class="step-sub">Code: <code>{{ run.safe_error_code or "unknown" }}</code></p>
+        <div class="state-actions">
+          {% if run.safe_error_code and ("auth" in run.safe_error_code or "reconnect" in run.safe_error_code) %}
+            <a class="btn btn-sm btn-primary" href="{{ url_for('accounts.connect_page') }}">Reconnect Gmail</a>
+          {% else %}
+            <form method="post" action="{{ url_for('inbox.sync') }}">{{ sync_form.hidden_tag() }}<button class="btn btn-sm btn-primary" type="submit">{{ icon("refresh", "icon-sm") }} Try again</button></form>
+          {% endif %}
+          <a class="btn btn-sm btn-ghost" href="{{ url_for('inbox.workspace') }}">Browse indexed conversations</a>
+        </div>
+      {% endcall %}
+    {% elif done %}
+      {% call state("Your workspace is ready", "success", "check-circle") %}
+        <p>Indexed {{ run.completed_count }} {{ "conversation" if run.completed_count == 1 else "conversations" }}.</p>
+        <div class="state-actions"><a class="btn btn-primary" href="{{ url_for('inbox.workspace') }}">Open workspace {{ icon("arrow-right", "icon-sm") }}</a></div>
+      {% endcall %}
+    {% elif overdue %}
+      {% call state("Still waiting for the worker", "warning", "hourglass") %}
+        <p>This run hasn't finished and live updates have stopped. Processing is durable and resumes automatically; refresh later to check again.</p>
+        <div class="state-actions"><a class="btn btn-sm btn-quiet" href="{{ url_for('inbox.run_status', run_id=run.id) }}">{{ icon("refresh", "icon-sm") }} Refresh status</a><a class="btn btn-sm btn-ghost" href="{{ url_for('inbox.workspace') }}">Browse indexed conversations</a></div>
+      {% endcall %}
+    {% else %}
+      <p class="progress-live"><span class="live-dot" aria-hidden="true"></span>{% if slow %}Taking longer than usual — checking every 10 seconds.{% else %}Updating automatically.{% endif %} It's safe to leave; processing continues in the background.</p>
+      <p class="progress-checked">Last checked <time datetime="{{ checked_at.isoformat() }}" data-localtime="time">{{ checked_at.strftime('%H:%M:%S') }} UTC</time>. <a href="{{ url_for('inbox.workspace') }}">Browse while you wait</a></p>
+    {% endif %}
+  </div>
+</div>

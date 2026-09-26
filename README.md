@@ -33,13 +33,16 @@ Development Google testing projects may issue short-lived refresh tokens. Use a 
 ## Commands
 
 ```bash
-make migrate     # application and Procrastinate schemas
+make migrate     # application migrations and idempotent Procrastinate schema install
 make seed-demo   # guarded: fake mail and non-production only
 make test        # disposable PostgreSQL/pgvector test database
 make lint
 make security
 make logs
 make down        # preserves the local database volume
+make demo-smoke  # health, static assets, and running services for the demo
+make worker-once # drain runnable queue jobs once, then exit
+make reset-local # destructive: deletes the local database volume after confirmation
 ```
 
 ## Runtime roles

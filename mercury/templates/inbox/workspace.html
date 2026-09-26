@@ -1,9 +1,235 @@
-{% extends "base.html" %}{% block title %}Workspace — Mercury{% endblock %}
+{% extends "base.html" %}
+{% from "components/icons.html" import icon %}
+{% from "components/brand.html" import mark %}
+{% from "components/ui.html" import badge, state, empty, count, connection_badge %}
+{% from "inbox/_thread_row.html" import thread_row with context %}
+{% block title %}{{ view_label if current_user.gmail_account else "Workspace" }} — Mercury{% endblock %}
+{% block body_class %}app-page{% endblock %}
+{% block footer %}{% endblock %}
 {% block content %}
-{% if not current_user.gmail_account %}<section class="empty-state"><h1>Connect a mailbox</h1><p>Start with a bounded, disclosed indexing window.</p><a class="btn btn-primary" href="{{ url_for('accounts.connect_page') }}">Connect Gmail</a></section>
-{% else %}<div class="workspace">
-  <aside class="workspace-nav"><h1 class="h5">Workspace</h1><nav><a href="{{ url_for('inbox.workspace') }}">All indexed threads</a><a href="{{ url_for('inbox.workspace') }}">Unsorted</a>{% for bucket in buckets %}<a href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) }}">{{ bucket.name }}</a>{% endfor %}<a href="{{ url_for('buckets.create') }}">+ New bucket</a><a href="{{ url_for('buckets.rules') }}">Sender rules</a></nav><form method="post" action="{{ url_for('inbox.sync') }}">{{ sync_form.hidden_tag() }}<button class="btn btn-sm btn-outline-primary" type="submit">Sync now</button></form><p class="sync-state">{{ current_user.gmail_account.connection_state }}{% if current_user.gmail_account.last_synced_at %} · {{ current_user.gmail_account.last_synced_at.strftime('%b %d %H:%M') }}{% endif %}</p></aside>
-  <section class="thread-list" aria-label="Threads"><header><h2>{{ selected_bucket.name if selected_bucket else 'Indexed threads' }}</h2><p>{{ rows|length }} shown</p></header>{% for thread, analysis, assignment, bucket in rows %}<a class="thread-row" href="{{ url_for('inbox.thread_reader', thread_id=thread.id) }}"><span class="sender">{{ thread.participants[-1].name or thread.participants[-1].address }}</span><strong>{{ thread.subject }}</strong><span>{{ analysis.summary if analysis else 'Analysis pending' }}</span><span class="thread-meta">{{ bucket.name if bucket else 'Unsorted' }} · {{ thread.latest_message_at.strftime('%b %d') }}{% if thread.gmail_unread %} · Gmail unread{% endif %}</span>{% if analysis and analysis.action_required and analysis.action_status == 'open' %}<span class="status-badge">Possible action</span>{% endif %}</a>{% else %}<div class="empty-state"><h2>No indexed conversations yet</h2><p>Connect or sync the mailbox to populate this view.</p></div>{% endfor %}</section>
-  <aside class="reader-placeholder"><p>Select a conversation to read it.</p></aside>
-</div>{% endif %}{% endblock %}
+{% set account = current_user.gmail_account %}
+{% if not account %}
+<section class="onboard">
+  <div class="onboard-card">
+    <div class="onboard-mark" aria-hidden="true">{{ mark(64, "onboard") }}</div>
+    <p class="eyebrow">Welcome to Mercury</p>
+    <h1 class="onboard-title">Connect a mailbox to begin</h1>
+    <p class="lead-m">Mercury indexes a bounded, recent window of Gmail, suggests categories you can correct, and lets you read original messages here. You'll see exactly what is read and stored before anything is connected.</p>
+    <ol class="steps-inline">
+      <li><span class="step-num">1</span><span>Review the disclosure</span></li>
+      <li><span class="step-num">2</span><span>Mercury indexes recent conversations</span></li>
+      <li><span class="step-num">3</span><span>Correct a few suggestions</span></li>
+    </ol>
+    <a class="btn btn-primary btn-lg" href="{{ url_for('accounts.connect_page') }}">{{ icon("mail") }} Connect Gmail</a>
+  </div>
+</section>
+{% else %}
+{% set run_active = latest_run and latest_run.status in ["pending", "running"] %}
+<div class="workspace" data-workspace>
+  <aside class="ws-nav" aria-label="Workspace navigation">
+    <nav class="ws-nav-scroll">
+      <ul class="nav-list" role="list">
+        {% set view_icons = {"overview": "grid", "attention": "flag", "all": "layers", "unsorted": "unsorted"} %}
+        {% set view_counts = {"overview": None, "attention": counts.attention, "all": counts.total, "unsorted": counts.unsorted} %}
+        {% for key, label in views.items() %}
+        <li><a class="nav-item" href="{{ url_for('inbox.workspace') if key == 'overview' else url_for('inbox.workspace', view=key) }}"{% if not selected_bucket and view == key %} aria-current="page"{% endif %}>
+          {{ icon(view_icons[key]) }}<span class="nav-label">{{ label }}</span>{{ count(view_counts[key], "conversations") }}
+        </a></li>
+        {% endfor %}
+      </ul>
+      <div class="nav-group">
+        <div class="nav-heading">
+          <h2 class="nav-heading-text" id="buckets-heading">Buckets</h2>
+          <a class="icon-btn icon-btn-sm" href="{{ url_for('buckets.create') }}" title="Create bucket">{{ icon("plus", "icon-sm") }}<span class="visually-hidden">Create bucket</span></a>
+        </div>
+        {% if buckets %}
+        <ul class="nav-list" role="list" aria-labelledby="buckets-heading">
+          {% for bucket in buckets %}
+          <li><a class="nav-item" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) }}"{% if selected_bucket and selected_bucket.id == bucket.id %} aria-current="page"{% endif %}>
+            {{ icon("folder") }}<span class="nav-label">{{ bucket.name }}</span>{{ count(counts.per_bucket.get(bucket.id, 0), "conversations") }}
+          </a></li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="nav-hint">No categories yet. Suggestions appear after indexing, or <a href="{{ url_for('buckets.create') }}">create one</a>.</p>
+        {% endif %}
+      </div>
+      <ul class="nav-list nav-list-secondary" role="list">
+        <li><a class="nav-item" href="{{ url_for('buckets.rules') }}">{{ icon("funnel") }}<span class="nav-label">Sender rules</span></a></li>
+        <li><a class="nav-item" href="{{ url_for('accounts.settings') }}">{{ icon("settings") }}<span class="nav-label">Settings</span></a></li>
+      </ul>
+    </nav>
+    <div class="sync-card" aria-label="Synchronization status" role="group">
+      <div class="sync-row">
+        {{ connection_badge(account.connection_state) }}
+        {% if account.last_synced_at %}<span class="sync-time">Synced <time datetime="{{ account.last_synced_at.isoformat() }}" data-localtime="relative">{{ account.last_synced_at|shortdate }}</time></span>{% endif %}
+      </div>
+      {% if config.MAIL_MODE == "fake" %}<p class="sync-note">{{ icon("bolt", "icon-xs") }} Synthetic mailbox · invented messages</p>{% endif %}
+      {% if run_active %}
+        <a class="sync-progress" href="{{ url_for('inbox.run_status', run_id=latest_run.id) }}">{{ icon("activity", "icon-sm") }} Processing · view progress</a>
+      {% endif %}
+      {% if account.connection_state == "connected" %}
+      <form method="post" action="{{ url_for('inbox.sync') }}">
+        {{ sync_form.hidden_tag() }}
+        <button class="btn btn-quiet btn-sm w-100" type="submit" data-busy-label="Syncing…">{{ icon("refresh", "icon-sm") }} Sync now</button>
+      </form>
+      {% endif %}
+    </div>
+  </aside>
 
+  <section class="ws-list" aria-labelledby="list-title" data-list-region>
+    <header class="list-head">
+      <div class="list-title-row">
+        <div class="list-title-wrap">
+          {% if selected_bucket %}<p class="eyebrow">Bucket</p>{% endif %}
+          <h1 class="list-title" id="list-title">{{ view_label }}</h1>
+        </div>
+        <div class="list-head-actions">
+          {% if selected_bucket %}
+            <a class="icon-btn" href="{{ url_for('buckets.edit', bucket_id=selected_bucket.id) }}" title="Rename or archive bucket">{{ icon("pencil") }}<span class="visually-hidden">Rename or archive bucket</span></a>
+            <a class="icon-btn" href="{{ url_for('buckets.merge', bucket_id=selected_bucket.id) }}" title="Merge bucket">{{ icon("merge") }}<span class="visually-hidden">Merge bucket</span></a>
+          {% endif %}
+          <button type="button" class="icon-btn js-only" data-shortcuts-open title="Keyboard shortcuts (?)">{{ icon("keyboard") }}<span class="visually-hidden">Keyboard shortcuts</span></button>
+        </div>
+      </div>
+      {% if selected_bucket and selected_bucket.purpose %}<p class="list-purpose">{{ selected_bucket.purpose }}</p>{% endif %}
+      {% if rows %}
+      <div class="list-tools js-only">
+        <label class="row-select select-all" title="Select all shown">
+          <input type="checkbox" class="form-check-input" data-select-all>
+          <span class="visually-hidden">Select all shown conversations</span>
+        </label>
+        <div class="filter-field">
+          {{ icon("search", "icon-sm") }}
+          <label class="visually-hidden" for="list-filter">Filter the conversations shown</label>
+          <input type="search" id="list-filter" class="form-control form-control-sm" placeholder="Filter this list" autocomplete="off" data-list-filter>
+          <kbd class="kbd-hint" aria-hidden="true">/</kbd>
+        </div>
+      </div>
+      <div class="bulk-bar" data-bulk-bar hidden>
+        <p class="bulk-count" data-bulk-count role="status">0 selected</p>
+        {% if buckets %}<button type="button" class="btn btn-primary btn-sm" data-bulk-move>{{ icon("move", "icon-sm") }} Move to…</button>{% endif %}
+        <button type="button" class="btn btn-ghost btn-sm" data-bulk-clear>Clear</button>
+      </div>
+      {% endif %}
+      <p class="list-count"><span data-list-count>{{ rows|length }}</span> {{ "conversation" if rows|length == 1 else "conversations" }} shown{% if rows|length >= 100 %} · most recent 100{% endif %}</p>
+    </header>
+
+    <div class="list-states">
+      {% if account.connection_state == "reconnect_required" %}
+        {% call state("Gmail needs to be reconnected", "warning", "unplug", role="status") %}
+          <p>Mercury's access expired or was revoked. You can keep browsing what's already indexed; new mail and original text need a fresh authorization.</p>
+          <a class="btn btn-sm btn-primary" href="{{ url_for('accounts.connect_page') }}">Reconnect Gmail</a>
+        {% endcall %}
+      {% elif account.connection_state == "deleting" %}
+        {% call state("Disconnecting Gmail", "danger", "trash", role="status") %}
+          <p>Processing has stopped and Mercury is removing this mailbox's derived data.</p>
+        {% endcall %}
+      {% endif %}
+      {% if run_active %}
+        {% call state("Indexing in progress — partial results", "info", "activity", compact=True) %}
+          <p>Showing conversations indexed so far. <a href="{{ url_for('inbox.run_status', run_id=latest_run.id) }}">View progress</a></p>
+        {% endcall %}
+      {% elif latest_run and latest_run.safe_error_code %}
+        {% call state("Processing paused", "warning", "pause", compact=True) %}
+          <p>The last run stopped with code <code>{{ latest_run.safe_error_code }}</code>. Indexed conversations remain available. <a href="{{ url_for('inbox.run_status', run_id=latest_run.id) }}">Details</a></p>
+        {% endcall %}
+      {% endif %}
+      {% if not account.ai_consent or not config.AI_PROCESSING_ENABLED %}
+        {% if view in ["overview", "attention"] and not selected_bucket %}
+        {% call state("AI summaries are off", "neutral", "eye-off", compact=True) %}
+          <p>{% if not account.ai_consent %}You chose not to send message text to an AI provider, so Mercury shows Gmail's preview text and relies on your buckets and sender rules.{% else %}AI processing is disabled for this Mercury instance. Organization and reading still work.{% endif %}</p>
+        {% endcall %}
+        {% endif %}
+      {% endif %}
+    </div>
+
+    {% if view == "overview" and not selected_bucket and counts.total %}
+    <ul class="stat-grid" role="list" aria-label="Mailbox overview">
+      <li><a class="stat" href="{{ url_for('inbox.workspace', view='attention') }}"><span class="stat-icon tone-action">{{ icon("flag") }}</span><span class="stat-num">{{ counts.attention }}</span><span class="stat-label">Possible actions</span></a></li>
+      <li><div class="stat"><span class="stat-icon tone-unread">{{ icon("mail") }}</span><span class="stat-num">{{ counts.unread }}</span><span class="stat-label">Unread in Gmail</span></div></li>
+      <li><div class="stat"><span class="stat-icon tone-new">{{ icon("ring") }}</span><span class="stat-num">{{ counts.unopened }}</span><span class="stat-label">New in Mercury</span></div></li>
+      <li><a class="stat" href="{{ url_for('inbox.workspace', view='unsorted') }}"><span class="stat-icon tone-muted">{{ icon("unsorted") }}</span><span class="stat-num">{{ counts.unsorted }}</span><span class="stat-label">Unsorted</span></a></li>
+    </ul>
+    {% endif %}
+
+    {% if rows %}
+    <ol class="thread-list" role="list" data-thread-list aria-labelledby="list-title">
+      {% for thread, analysis, assignment, bucket in rows %}{{ thread_row(thread, analysis, assignment, bucket, account) }}{% endfor %}
+    </ol>
+    <div class="filter-empty" data-filter-empty hidden>
+      {% call empty("No conversations match that filter", "search") %}<p>The filter only searches conversations already shown on this page.</p>{% endcall %}
+    </div>
+    {% else %}
+      {% if selected_bucket %}
+        {% call empty("This bucket is empty", "folder") %}<p>Move conversations here from the reader or with bulk selection. Mercury keeps manual moves in place.</p>{% endcall %}
+      {% elif view == "attention" %}
+        {% call empty("Nothing needs attention", "check-circle") %}<p>No open possible actions. Mercury flags actions conservatively; anything it's unsure about stays unflagged.</p>{% endcall %}
+      {% elif view == "unsorted" %}
+        {% call empty("Everything is sorted", "check-circle") %}<p>Uncertain conversations land here instead of being forced into a category.</p>{% endcall %}
+      {% elif run_active %}
+        {% call empty("Finding conversations…", "activity") %}<p>Indexing is running in the background. <a href="{{ url_for('inbox.run_status', run_id=latest_run.id) }}">View progress</a></p>{% endcall %}
+      {% else %}
+        {% call empty("No indexed conversations yet", "inbox") %}<p>Run a sync to index your recent Gmail window.</p>{% endcall %}
+      {% endif %}
+    {% endif %}
+  </section>
+
+  <section class="ws-reader" id="reader-panel" aria-label="Reader" tabindex="-1" data-reader-panel>
+    <div class="reader-empty">
+      <div class="reader-empty-art" aria-hidden="true">{{ mark(72, "reader") }}</div>
+      <h2 class="reader-empty-title">Select a conversation</h2>
+      <p>Summaries come from Mercury's index. Original text is fetched from Gmail only when you open a conversation, and isn't stored.</p>
+      <p class="reader-empty-keys js-only"><kbd>j</kbd> <kbd>k</kbd> to move · <kbd>Enter</kbd> to open · <kbd>?</kbd> for shortcuts</p>
+    </div>
+  </section>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block dialogs %}
+{% if current_user.gmail_account %}
+<dialog class="dialog-m" id="bulk-move-dialog" aria-labelledby="bulk-move-title">
+  <form method="dialog" class="dialog-inner" data-bulk-form>
+    <h2 class="dialog-title" id="bulk-move-title">Move <span data-bulk-noun>conversations</span></h2>
+    <label class="form-label" for="bulk-destination">Destination bucket</label>
+    <select class="form-select" id="bulk-destination" data-bulk-destination>
+      {% for bucket in buckets %}<option value="{{ bucket.id }}" data-href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) }}">{{ bucket.name }}</option>{% endfor %}
+    </select>
+    <ul class="consequences">
+      <li>{{ icon("check", "icon-sm") }} Changes organization in Mercury{% if config.GMAIL_LABEL_WRITES_ENABLED and current_user.gmail_account.label_write_consent %} and updates Mercury-owned Gmail labels{% endif %}.</li>
+      <li>{{ icon("lock", "icon-sm") }} Moved conversations stay put when suggestions are refreshed.</li>
+      <li>{{ icon("shield", "icon-sm") }} Gmail messages are not moved, archived, or deleted.</li>
+    </ul>
+    <p class="dialog-status" data-bulk-status role="status" aria-live="polite"></p>
+    <div class="dialog-actions">
+      <button class="btn btn-ghost" value="cancel" type="submit" data-bulk-cancel>Cancel</button>
+      <button class="btn btn-primary" type="button" data-bulk-confirm>Move <span data-bulk-number>0</span></button>
+    </div>
+  </form>
+</dialog>
+<dialog class="dialog-m" id="shortcuts-dialog" aria-labelledby="shortcuts-title">
+  <form method="dialog" class="dialog-inner">
+    <h2 class="dialog-title" id="shortcuts-title">Keyboard shortcuts</h2>
+    <dl class="shortcut-list">
+      <div><dt><kbd>j</kbd> / <kbd>↓</kbd></dt><dd>Next conversation</dd></div>
+      <div><dt><kbd>k</kbd> / <kbd>↑</kbd></dt><dd>Previous conversation</dd></div>
+      <div><dt><kbd>Enter</kbd> / <kbd>o</kbd></dt><dd>Open in reader</dd></div>
+      <div><dt><kbd>x</kbd></dt><dd>Select or deselect</dd></div>
+      <div><dt><kbd>m</kbd></dt><dd>Move selected…</dd></div>
+      <div><dt><kbd>/</kbd></dt><dd>Filter this list</dd></div>
+      <div><dt><kbd>Esc</kbd></dt><dd>Back to the list</dd></div>
+      <div><dt><kbd>?</kbd></dt><dd>Show this help</dd></div>
+    </dl>
+    <div class="dialog-actions"><button class="btn btn-primary" type="submit">Done</button></div>
+  </form>
+</dialog>
+<template id="reader-skeleton">
+  <div class="reader-skeleton" aria-busy="true" aria-label="Loading conversation">
+    <span class="sk sk-eyebrow"></span><span class="sk sk-title"></span><span class="sk sk-line w-50"></span>
+    <span class="sk sk-card"></span><span class="sk sk-line"></span><span class="sk sk-line"></span><span class="sk sk-line w-75"></span>
+    <span class="visually-hidden">Loading conversation…</span>
+  </div>
+</template>
+{% endif %}
+{% endblock %}

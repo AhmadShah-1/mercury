@@ -1,0 +1,5 @@
+{#- HTMX reader-panel response. The selected row and any flash toasts update out-of-band. -#}
+{% from "inbox/_thread_row.html" import thread_row with context %}
+{% include "inbox/_reader.html" %}
+{{ thread_row(thread, analysis, assignment, bucket, account, oob=True, current=True) }}
+{% with oob = True %}{% include "components/toasts.html" %}{% endwith %}

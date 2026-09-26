@@ -8,40 +8,41 @@ jobs:
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with: { fetch-depth: 0 }
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   test:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        image: pgvector/pgvector:0.8.2-pg17-bookworm@sha256:feb68f4f15446397d8cac7f4fe48fe4586de83160d1fc48b46283312d1a33966
         env:
           POSTGRES_DB: mercury_test
           POSTGRES_USER: mercury
           POSTGRES_PASSWORD: mercury_test
-        ports: ["5432:5432"]
+        ports: ["55433:5432"]
         options: >-
           --health-cmd "pg_isready -U mercury -d mercury_test"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       APP_ENV: testing
       APP_BASE_URL: http://localhost:5000
-      DATABASE_URL: postgresql+psycopg://mercury:mercury_test@localhost:5432/mercury_test
+      DATABASE_URL: postgresql+psycopg://mercury:mercury_test@localhost:55433/mercury_test
       AUTH_MODE: dev
       MAIL_MODE: fake
       AI_PROVIDER: fake
       SYNC_MODE: manual
       DEBUG: "false"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with: { python-version: "3.12" }
       - run: pipx install poetry==2.4.1
       - run: poetry install --sync
       - run: poetry run flask --app wsgi:app db upgrade
+      - run: poetry run flask --app wsgi:app queue-schema
       - run: poetry run ruff check .
       - run: poetry run ruff format --check .
       - run: poetry run pytest --cov=mercury --cov-report=term-missing
@@ -50,9 +51,9 @@ jobs:
   container:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: docker build -f deploy/Dockerfile -t mercury-ci:${{ github.sha }} .
-      - uses: aquasecurity/trivy-action@0.33.1
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: mercury-ci:${{ github.sha }}
           format: table

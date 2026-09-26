@@ -1,3 +1,18 @@
-{% extends "base.html" %}{% block title %}Terms — Mercury{% endblock %}
-{% block content %}<article class="document"><h1>Terms</h1><p>Mercury is an organization aid, not a system of record. Gmail remains authoritative. AI summaries and possible actions may be incomplete or incorrect and must not be treated as verified financial, legal, or scheduling obligations.</p></article>{% endblock %}
-
+{% extends "base.html" %}
+{% block title %}Terms — Mercury{% endblock %}
+{% block content %}
+<article class="doc">
+  <div class="doc-card">
+    <p class="eyebrow">Terms</p>
+    <h1>Using Mercury</h1>
+    <h2>An organization aid</h2>
+    <p>Mercury is an organization aid, not a system of record. Gmail remains authoritative for your messages, conversations, labels, and unread state.</p>
+    <h2>AI output</h2>
+    <p>AI summaries and possible actions may be incomplete or incorrect and must not be treated as verified financial, legal, or scheduling obligations. A payment or date mentioned in a message is shown as a claim in that message.</p>
+    <h2>What Mercury changes</h2>
+    <p>Bucket moves and “handled” markers change Mercury only. Mercury does not send, draft, delete, archive, or download attachments. Native Gmail labels are written only if both the operator and you enable label sync.</p>
+    <h2>Ending use</h2>
+    <p>You can disconnect Gmail or delete your Mercury account from Settings at any time. See the <a href="{{ url_for('public.privacy') }}">privacy page</a> for what is removed and when.</p>
+  </div>
+</article>
+{% endblock %}

@@ -16,6 +16,10 @@ on:
         description: Globally unique lowercase ACR name
         required: true
         type: string
+      app_hostname:
+        description: Hostname of the production APP_BASE_URL (used as the probe Host header)
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -30,8 +34,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/login@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
@@ -67,7 +71,7 @@ jobs:
         run: |
           az acr login --name '${{ inputs.registry_name }}'
           docker pull '${{ steps.image.outputs.reference }}'
-      - uses: aquasecurity/trivy-action@0.33.1
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.image.outputs.reference }}
           format: table
@@ -85,11 +89,21 @@ jobs:
           image='${{ steps.image.outputs.reference }}'
           dopplerToken='${{ secrets.DOPPLER_PRODUCTION_TOKEN }}'
           postgresPassword='${{ secrets.POSTGRES_ADMIN_PASSWORD }}'
+          appHostname='${{ inputs.app_hostname }}'
           --only-show-errors
       - name: Run controlled migrations
-        run: >-
-          az containerapp job start
-          --resource-group '${{ inputs.resource_group }}'
-          --name mercury-migrate
-          --wait
-          --only-show-errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          rg='${{ inputs.resource_group }}'
+          execution="$(az containerapp job start --resource-group "$rg" --name mercury-migrate --query name -o tsv --only-show-errors)"
+          for _ in $(seq 1 120); do
+            status="$(az containerapp job execution show --resource-group "$rg" --name mercury-migrate --job-execution-name "$execution" --query properties.status -o tsv --only-show-errors)"
+            case "$status" in
+              Succeeded) echo "Migration execution succeeded"; exit 0 ;;
+              Failed|Stopped|Degraded) echo "Migration execution ended with status $status" >&2; exit 1 ;;
+            esac
+            sleep 15
+          done
+          echo "Migration execution did not finish within 30 minutes" >&2
+          exit 1

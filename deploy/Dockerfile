@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM python:3.12.12-slim-bookworm AS builder
+FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c AS builder
 ENV POETRY_VERSION=2.4.1 POETRY_VIRTUALENVS_IN_PROJECT=true POETRY_NO_INTERACTION=1
 WORKDIR /app
 RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
@@ -10,9 +10,9 @@ COPY scripts ./scripts
 RUN poetry run python scripts/fetch_vendor_assets.py
 RUN poetry install --only main --sync
 
-FROM dopplerhq/cli:3 AS doppler
+FROM dopplerhq/cli:3@sha256:e974c93a74b0fd8795e48eb24b43eea273bf7773294f14c8c9184baf66e658cc AS doppler
 
-FROM python:3.12.12-slim-bookworm AS runtime
+FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c AS runtime
 ENV PATH="/app/.venv/bin:${PATH}" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN addgroup --system mercury && adduser --system --ingroup mercury --home /nonexistent mercury

@@ -1,6 +1,8 @@
-{% extends "base.html" %}{% block title %}{{ thread.subject }} — Mercury{% endblock %}
-{% block content %}<article class="reader-page"><a class="back-link" href="{{ url_for('inbox.workspace') }}">← Back to threads</a><header><p class="eyebrow">Original subject</p><h1>{{ thread.subject }}</h1><p>{{ thread.participants[-1].name }} &lt;{{ thread.participants[-1].address }}&gt;</p><div class="reader-actions"><a class="btn btn-primary" href="{{ open_url }}" target="_blank" rel="noopener noreferrer">Open in Gmail</a>{% if search_url %}<a href="{{ search_url }}" target="_blank" rel="noopener noreferrer">Search by Message-ID</a>{% endif %}</div></header>
-<section class="summary-card"><h2>AI summary</h2><p>{{ analysis.summary if analysis else 'Analysis is pending or disabled.' }}</p>{% if analysis and analysis.action_required %}<p><strong>Possible action:</strong> {{ analysis.action_text or analysis.action_type }}</p><form method="post" action="{{ url_for('inbox.action', thread_id=thread.id) }}">{{ action_form.hidden_tag() }}{{ action_form.status(class_='form-select') }}{{ action_form.submit(class_='btn btn-outline-primary') }}</form>{% endif %}</section>
-<section><h2>Move conversation</h2><form class="inline-controls" method="post" action="{{ url_for('inbox.move', thread_id=thread.id) }}">{{ move_form.hidden_tag() }}{{ move_form.bucket_id(class_='form-select') }}{{ move_form.submit(class_='btn btn-outline-primary') }}</form></section>
-<hr><section id="message-body" hx-get="{{ url_for('inbox.thread_body', thread_id=thread.id) }}" hx-trigger="load" hx-swap="innerHTML"><p class="loading">Fetching original message text…</p></section></article>{% endblock %}
-
+{% extends "base.html" %}
+{% block title %}{{ thread.subject }} — Mercury{% endblock %}
+{% block body_class %}page reader-body{% endblock %}
+{% block content %}
+<div class="reader-page" id="reader-panel" tabindex="-1" data-reader-panel data-reader-standalone>
+  {% with subject_tag = "h1" %}{% include "inbox/_reader.html" %}{% endwith %}
+</div>
+{% endblock %}

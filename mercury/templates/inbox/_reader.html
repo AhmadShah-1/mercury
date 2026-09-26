@@ -1,0 +1,121 @@
+{#- Reader content shared by the full page and the HTMX reader panel.
+    Every mail-, AI-, and user-derived value below is autoescaped text. -#}
+{% from "components/icons.html" import icon %}
+{% from "components/ui.html" import badge, state, action_label, action_icon %}
+{% from "inbox/_thread_row.html" import ai_state with context %}
+{% set subject_tag = subject_tag or "h2" %}
+{% set sender = thread.participants[-1] if thread.participants else {} %}
+{% set ai = ai_state(thread, analysis, account)|trim %}
+{% set in_bucket = bucket is not none and not bucket.archived %}
+<article class="reader" aria-labelledby="reader-subject" data-reader data-thread-id="{{ thread.id }}">
+  <div class="reader-bar">
+    <a class="back-link" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) if in_bucket else url_for('inbox.workspace') }}" data-reader-back>
+      {{ icon("arrow-left", "icon-sm") }}<span>Back<span class="hide-md"> to {{ bucket.name if in_bucket else "Overview" }}</span></span>
+    </a>
+    <div class="reader-bar-actions">
+      {%- if search_url %}<a class="btn btn-ghost btn-sm" href="{{ search_url }}" target="_blank" rel="noopener noreferrer" title="Search Gmail for this conversation's Message-ID">{{ icon("search", "icon-sm") }}<span class="hide-md"> Find by Message-ID</span><span class="visually-hidden"> in Gmail (opens in a new tab)</span></a>{% endif %}
+      <a class="btn btn-primary btn-sm" href="{{ open_url }}" target="_blank" rel="noopener noreferrer">{{ icon("external", "icon-sm") }} Open in Gmail<span class="visually-hidden"> (opens in a new tab)</span></a>
+    </div>
+  </div>
+
+  <header class="reader-head">
+    <p class="eyebrow">Original subject</p>
+    <{{ subject_tag }} class="reader-subject" id="reader-subject" tabindex="-1">{{ thread.subject }}</{{ subject_tag }}>
+    <div class="reader-badges">
+      {% if in_bucket %}{{ badge(bucket.name, "bucket", "folder", sr_prefix="Bucket:") }}{% else %}{{ badge("Unsorted", "muted", "unsorted", sr_prefix="Bucket:") }}{% endif %}
+      {% if assignment and assignment.locked_by_user %}{{ badge("Placed by you", "neutral", "lock", title="Suggestions won't move this conversation") }}{% endif %}
+      {% if thread.gmail_unread %}{{ badge("Unread in Gmail", "unread", "mail") }}{% endif %}
+      {% if thread.attachment_present %}{{ badge("Attachments in Gmail", "muted", "paperclip") }}{% endif %}
+    </div>
+    <dl class="reader-meta">
+      <div><dt>From</dt><dd><span class="person">{{ sender.get("name") or sender.get("address") or "Unknown sender" }}</span>{% if sender.get("name") and sender.get("address") %} <span class="addr">&lt;{{ sender.get("address") }}&gt;</span>{% endif %}</dd></div>
+      {% if latest_reference and latest_reference.recipients %}
+      <div><dt>To</dt><dd class="addr-list">{{ latest_reference.recipients[:4]|join(", ") }}{% if latest_reference.recipients|length > 4 %} and {{ latest_reference.recipients|length - 4 }} more{% endif %}</dd></div>
+      {% endif %}
+      <div><dt>Latest</dt><dd><time datetime="{{ thread.latest_message_at.isoformat() }}" data-localtime="long">{{ thread.latest_message_at|longdate }}</time></dd></div>
+      {% if thread.participants|length > 1 %}
+      <div><dt>People</dt><dd>{% for person in thread.participants|reverse|unique(attribute="address") %}{{ person.get("name") or person.get("address") }}{% if not loop.last %}, {% endif %}{% endfor %}</dd></div>
+      {% endif %}
+    </dl>
+    <p class="reader-hint">Reply, forward, and attachments happen in Gmail. Reading here doesn't change Gmail's unread state.</p>
+  </header>
+
+  <section class="summary-card summary-{{ ai }}" aria-labelledby="summary-heading">
+    <div class="summary-head">
+      <h3 class="summary-title" id="summary-heading">{{ icon("sparkle", "icon-sm") }} AI summary</h3>
+      {% if ai == "stale" %}{{ badge("May be outdated", "warning", "history") }}
+      {% elif ai == "pending" %}{{ badge("Pending", "neutral", "clock") }}
+      {% elif ai == "paused" %}{{ badge("Paused", "warning", "pause") }}
+      {% elif ai == "disabled" %}{{ badge("Off", "neutral", "eye-off") }}
+      {% elif analysis.uncertain %}{{ badge("Uncertain", "warning", "alert") }}{% endif %}
+    </div>
+    {% if ai in ["ready", "stale"] %}
+      <p class="summary-text">{{ analysis.summary }}</p>
+      {% if ai == "stale" %}<p class="summary-note">{{ icon("history", "icon-xs") }} New messages arrived after this summary was written. The original text below is current.</p>{% endif %}
+    {% elif ai == "paused" %}
+      <p class="summary-text summary-placeholder">The AI budget for this period has been reached, so new summaries are paused. Reading, organizing, and Open in Gmail keep working.</p>
+    {% elif ai == "disabled" %}
+      <p class="summary-text summary-placeholder">{% if not account.ai_consent %}AI summaries are off because you chose not to send message text to an AI provider.{% else %}AI processing is disabled for this Mercury instance.{% endif %} The original text is below.</p>
+    {% else %}
+      <p class="summary-text summary-placeholder">No summary yet. It is prepared in the background; the original text below doesn't depend on it.</p>
+    {% endif %}
+
+    {% if analysis and analysis.action_required %}
+    <div class="action-box action-{{ analysis.action_status }}" id="action-box">
+      <div class="action-main">
+        <span class="action-icon">{{ icon(action_icon(analysis.action_type)) }}</span>
+        <div>
+          <p class="action-kicker">Possible action · {{ action_label(analysis.action_type) }}</p>
+          <p class="action-text">{{ analysis.action_text or "Mercury noticed a possible request in this conversation." }}</p>
+          {% if analysis.due_date %}<p class="action-meta">{{ icon("calendar", "icon-xs") }} Date mentioned in the message: {{ analysis.due_date.strftime("%b %d, %Y") }}</p>{% endif %}
+          {% if analysis.action_type == "pay" %}<p class="action-meta">{{ icon("alert", "icon-xs") }} A claim in the message, not a verified obligation.</p>{% endif %}
+        </div>
+      </div>
+      <form class="action-controls" method="post" action="{{ url_for('inbox.action', thread_id=thread.id) }}" hx-post="{{ url_for('inbox.action', thread_id=thread.id) }}" hx-target="#reader-panel" hx-swap="innerHTML" hx-disabled-elt="find button">
+        {{ action_form.csrf_token }}
+        {% if analysis.action_status == "open" %}
+          <button class="btn btn-success-m btn-sm" type="submit" name="status" value="handled">{{ icon("check", "icon-sm") }} Mark handled in Mercury</button>
+          <button class="btn btn-ghost btn-sm" type="submit" name="status" value="dismissed">{{ icon("ban", "icon-sm") }} Not an action</button>
+        {% else %}
+          <p class="action-status" role="status">{% if analysis.action_status == "handled" %}{{ badge("Handled in Mercury", "success", "check") }}{% else %}{{ badge("Marked not an action", "neutral", "ban") }}{% endif %}</p>
+          <button class="btn btn-ghost btn-sm" type="submit" name="status" value="open">{{ icon("refresh", "icon-sm") }} Reopen</button>
+        {% endif %}
+      </form>
+      <p class="action-foot">These controls change Mercury only. Nothing is sent, paid, or changed in Gmail.</p>
+    </div>
+    {% endif %}
+    <p class="summary-foot">{% if config.AI_PROVIDER == "fake" %}Synthetic fixture output for the offline demo.{% else %}Generated from message text by the configured AI provider.{% endif %} Summaries can be incomplete or wrong — the original is below.</p>
+  </section>
+
+  <section class="organize-card" aria-labelledby="organize-heading">
+    <h3 class="organize-title" id="organize-heading">{{ icon("move", "icon-sm") }} Bucket</h3>
+    {% if buckets %}
+    <form class="move-form" method="post" action="{{ url_for('inbox.move', thread_id=thread.id) }}" hx-post="{{ url_for('inbox.move', thread_id=thread.id) }}" hx-target="#reader-panel" hx-swap="innerHTML" hx-disabled-elt="find button">
+      {{ move_form.csrf_token }}
+      <label class="visually-hidden" for="move-{{ thread.id }}">Move this conversation to</label>
+      <select class="form-select form-select-sm" id="move-{{ thread.id }}" name="{{ move_form.bucket_id.name }}" required>
+        {% if not in_bucket %}<option value="" selected disabled>Choose a bucket…</option>{% endif %}
+        {% for value, label in move_form.bucket_id.choices %}<option value="{{ value }}"{% if in_bucket and value == bucket.id|string %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <button class="btn btn-quiet btn-sm" type="submit">Move</button>
+    </form>
+    <p class="organize-hint">A manual move keeps this conversation in place when suggestions are refreshed. Gmail is not changed{% if config.GMAIL_LABEL_WRITES_ENABLED and account.label_write_consent %} except for Mercury-owned labels{% endif %}.</p>
+    {% else %}
+    <p class="organize-hint">No buckets yet. <a href="{{ url_for('buckets.create') }}">Create a bucket</a> to organize this conversation.</p>
+    {% endif %}
+  </section>
+
+  <section class="messages" aria-labelledby="messages-heading">
+    <div class="messages-sep">
+      <h3 class="messages-title" id="messages-heading">Original messages</h3>
+      <span class="messages-sub">From Gmail · newest first · not stored</span>
+    </div>
+    <div id="message-body" class="message-body" data-swap-errors hx-get="{{ url_for('inbox.thread_body', thread_id=thread.id) }}" hx-trigger="load" hx-swap="innerHTML" aria-live="polite" aria-busy="true">
+      <div class="body-skeleton js-only" aria-hidden="true">
+        <span class="sk sk-line w-40"></span><span class="sk sk-line"></span><span class="sk sk-line"></span><span class="sk sk-line w-75"></span><span class="sk sk-line w-60"></span>
+      </div>
+      <p class="loading-text js-only">Fetching original message text from Gmail…</p>
+      <noscript><p class="loading-text"><a href="{{ url_for('inbox.thread_body', thread_id=thread.id) }}">Show the original message text</a> (plain page).</p></noscript>
+    </div>
+  </section>
+</article>

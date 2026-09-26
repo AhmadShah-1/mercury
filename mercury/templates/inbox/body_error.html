@@ -1,2 +1,31 @@
-<div class="alert alert-warning">{{ message }}</div>
-
+{#- Safe, fixed wording per failure kind. No provider details or exception text are rendered. -#}
+{% from "components/icons.html" import icon %}
+{% from "components/ui.html" import state %}
+{% set retry %}<a class="btn btn-sm btn-quiet" href="{{ url_for('inbox.thread_reader', thread_id=thread.id) }}" hx-get="{{ url_for('inbox.thread_body', thread_id=thread.id) }}" hx-target="#message-body" hx-swap="innerHTML">{{ icon("refresh", "icon-sm") }} Try again</a>{% endset %}
+<div class="body-error" data-body-error="{{ kind }}">
+{% if kind == "reauth" %}
+  {% call state("Reconnect Gmail to read this message", "warning", "unplug", role="status") %}
+    <p>Mercury's access to Gmail expired or was revoked. Your buckets and saved summaries are still here, but original text needs a fresh authorization.</p>
+    <a class="btn btn-sm btn-primary" href="{{ url_for('accounts.connect_page') }}">Reconnect Gmail</a>
+  {% endcall %}
+{% elif kind == "disconnected" %}
+  {% call state("Gmail is disconnected", "neutral", "unplug", role="status") %}
+    <p>Original messages can't be fetched while no mailbox is connected.</p>
+    <a class="btn btn-sm btn-primary" href="{{ url_for('accounts.connect_page') }}">Connect Gmail</a>
+  {% endcall %}
+{% elif kind == "deleted" %}
+  {% call state("This message is no longer available", "neutral", "file-x", role="status") %}
+    <p>It may have been deleted or moved out of reach in Gmail. Mercury will update this conversation on the next sync.</p>
+  {% endcall %}
+{% elif kind == "provider_rate_limited" %}
+  {% call state("Gmail is limiting requests right now", "warning", "hourglass", role="status") %}
+    <p>Gmail is limiting requests right now; the summary above is still Mercury's saved analysis, not the original. Please try again in a moment.</p>
+    {{ retry }}
+  {% endcall %}
+{% else %}
+  {% call state("Gmail is temporarily unavailable", "warning", "alert", role="status") %}
+    <p>Gmail is temporarily unavailable; the summary above is still Mercury's saved analysis, not the original.</p>
+    {{ retry }}
+  {% endcall %}
+{% endif %}
+</div>

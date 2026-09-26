@@ -1,25 +1,181 @@
 {% extends "base.html" %}
-{% block title %}Mercury — a calm Gmail workspace{% endblock %}
+{% from "components/icons.html" import icon %}
+{% from "components/brand.html" import mark %}
+{% from "components/ui.html" import badge %}
+{% block title %}Mercury — a calm workspace for Gmail{% endblock %}
 {% block content %}
-<section class="hero">
-  <p class="eyebrow">Quiet organization for Gmail</p>
-  <h1>Find the messages that deserve your attention.</h1>
-  <p>Mercury organizes a bounded part of your mailbox, keeps Gmail authoritative, and opens original message text without turning your inbox into a chat interface.</p>
+{% macro primary_cta(large=True) -%}
   {% if current_user.is_authenticated %}
-    <a class="btn btn-primary" href="{{ url_for('inbox.workspace') }}">Open workspace</a>
+    <a class="btn btn-primary{% if large %} btn-lg{% endif %}" href="{{ url_for('inbox.workspace') }}">Open your workspace {{ icon("arrow-right", "icon-sm") }}</a>
   {% elif config.AUTH_MODE == 'dev' %}
-    <a class="btn btn-primary" href="{{ url_for('accounts.dev_login') }}">Open synthetic demo</a>
+    <a class="btn btn-primary{% if large %} btn-lg{% endif %}" href="{{ url_for('accounts.dev_login') }}">Open the synthetic demo {{ icon("arrow-right", "icon-sm") }}</a>
   {% else %}
     <form method="post" action="{{ url_for('accounts.google_start') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn btn-primary" type="submit">Sign in with Google</button>
+      <button class="btn btn-primary{% if large %} btn-lg{% endif %}" type="submit">Sign in with Google {{ icon("arrow-right", "icon-sm") }}</button>
     </form>
   {% endif %}
+{%- endmacro %}
+<section class="hero-m" aria-labelledby="hero-title">
+  <div class="hero-lines" aria-hidden="true"></div>
+  <span class="hero-streak s1" aria-hidden="true"></span><span class="hero-streak s2" aria-hidden="true"></span><span class="hero-streak s3" aria-hidden="true"></span>
+  <div class="hero-grid">
+    <div class="hero-copy">
+      <p class="pill-note"><span class="pill-dot">{{ icon("bolt", "icon-xs") }}</span>A calm workspace for Gmail</p>
+      <h1 id="hero-title">Turn a noisy inbox into a <span class="hl">calm, organized</span> workspace.</h1>
+      <p class="lead-m">Mercury groups your recent Gmail into categories you control, writes a short AI summary for each conversation, and flags possible actions — while Gmail stays the source of truth.</p>
+      <div class="hero-actions">
+        {{ primary_cta() }}
+        <a class="btn btn-quiet btn-lg" href="#how">How it works</a>
+      </div>
+      <ul class="hero-trust" role="list">
+        <li>{{ icon("check-circle", "icon-sm") }} Never sends or deletes mail</li>
+        <li>{{ icon("check-circle", "icon-sm") }} Your moves always win</li>
+        <li>{{ icon("check-circle", "icon-sm") }} Disconnect removes derived data</li>
+      </ul>
+    </div>
+
+    <figure class="preview" role="img" aria-label="Illustration of the Mercury workspace using invented example messages">
+      <div class="preview-window" aria-hidden="true">
+        <div class="preview-chrome"><span></span><span></span><span></span><em>Mercury · Overview</em></div>
+        <div class="preview-body">
+          <div class="preview-nav">
+            <span class="pv-nav is-on">Overview</span>
+            <span class="pv-nav">Needs attention <b>2</b></span>
+            <span class="pv-nav">Unsorted <b>3</b></span>
+            <span class="pv-head">Buckets</span>
+            <span class="pv-nav">Work <b>12</b></span>
+            <span class="pv-nav">Finance <b>5</b></span>
+            <span class="pv-nav">Purchases <b>8</b></span>
+          </div>
+          <div class="preview-list">
+            <div class="pv-row is-current">
+              <span class="pv-top">Mina Patel <time>10:30</time></span>
+              <span class="pv-subj">Revised launch forecast</span>
+              <span class="pv-sum"><span class="ai-tag">AI</span> Asks you to review the revised forecast.</span>
+              <span class="pv-meta">{{ badge("Work", "bucket", "folder") }}{{ badge("Unread in Gmail", "unread", "mail") }}{{ badge("Review", "action", "eye") }}</span>
+            </div>
+            <div class="pv-row">
+              <span class="pv-top">Parcel Grove <time>Sep 20</time></span>
+              <span class="pv-subj">Your order has shipped</span>
+              <span class="pv-sum"><span class="ai-tag">AI</span> Shipping update; no action needed.</span>
+              <span class="pv-meta">{{ badge("Purchases", "bucket", "folder") }}{{ badge("Attachment", "muted", "paperclip") }}</span>
+            </div>
+            <div class="pv-row">
+              <span class="pv-top">Casey Rivera <time>Sep 17</time></span>
+              <span class="pv-subj">Question about the workshop</span>
+              <span class="pv-sum"><span class="ai-tag">AI</span> Asks to confirm a workshop time.</span>
+              <span class="pv-meta">{{ badge("Unsorted", "muted", "unsorted") }}{{ badge("Reply", "action", "reply") }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="preview-float" aria-hidden="true">
+        <span class="summary-title">{{ icon("sparkle", "icon-xs") }} AI summary</span>
+        <p>The sender asks you to review the revised forecast and reply by Friday.</p>
+        <p class="pv-meta">{{ badge("Mark handled in Mercury", "success", "check") }}</p>
+      </div>
+      <figcaption class="preview-caption">Illustration with invented messages.</figcaption>
+    </figure>
+  </div>
 </section>
-<section class="public-grid">
-  <article><h2>Read-only by design</h2><p>Mercury does not send, draft, delete, archive, or retrieve attachments.</p></article>
-  <article><h2>User choices stay put</h2><p>Manual bucket assignments and names are never silently replaced.</p></article>
-  <article><h2>Honest data handling</h2><p>Metadata and derived organization are retained while connected. Bodies are fetched when needed and are not stored in Mercury's database.</p></article>
+
+<section class="section-m" id="how" aria-labelledby="how-title">
+  <div class="section-head is-center" data-reveal>
+    <p class="eyebrow">How it works</p>
+    <h2 class="section-title" id="how-title">From noise to a quiet overview in three steps</h2>
+    <p class="lead-m">No setup of filters, no new inbox to learn. Mercury works alongside Gmail.</p>
+  </div>
+  <ol class="how-steps" role="list">
+    <li class="how-step" data-reveal>
+      <span class="how-num">1</span>
+      <h3>Connect with a clear disclosure</h3>
+      <p>Before anything is connected, Mercury shows what it reads, what it keeps, and which AI provider — if you allow it — receives selected text.</p>
+    </li>
+    <li class="how-step" data-reveal>
+      <span class="how-num">2</span>
+      <h3>A bounded, visible index</h3>
+      <p>Mercury indexes up to {{ "{:,}".format(config.INDEX_MAX_THREADS) }} recently active conversations from the last {{ (config.INDEX_LOOKBACK_DAYS / 30)|round|int }} months and shows measured progress — no surprise full-mailbox scan.</p>
+    </li>
+    <li class="how-step" data-reveal>
+      <span class="how-num">3</span>
+      <h3>Review, read, and move on</h3>
+      <p>Correct a few suggested categories, read summaries and the original text, and open Gmail only when you need to reply or grab an attachment.</p>
+    </li>
+  </ol>
+</section>
+
+<div class="band">
+<section class="section-m" aria-labelledby="features-title">
+  <div class="section-head" data-reveal>
+    <p class="eyebrow">Built for trust</p>
+    <h2 class="section-title" id="features-title">Automation that stays out of your way</h2>
+  </div>
+  <div class="feature-grid">
+    <article class="feature" data-reveal>
+      <span class="feature-icon">{{ icon("folder") }}</span>
+      <div><h3>Categories you control</h3><p>Suggested buckets you can rename, merge, or archive. A conversation you move stays put, a name you choose is never replaced, and uncertain mail waits in Unsorted.</p></div>
+    </article>
+    <article class="feature" data-reveal>
+      <span class="feature-icon">{{ icon("sparkle") }}</span>
+      <div><h3>Summaries, clearly labelled</h3><p>One concise AI summary per conversation and conservative possible-action hints. Mark them handled in Mercury — nothing is ever sent, paid, or scheduled for you.</p></div>
+    </article>
+    <article class="feature" data-reveal>
+      <span class="feature-icon">{{ icon("book") }}</span>
+      <div><h3>Read without leaving</h3><p>Original message text opens inside Mercury as safe, plain text, newest first. <strong>Open in Gmail</strong> is always one click away for replies and attachments.</p></div>
+    </article>
+    <article class="feature" data-reveal>
+      <span class="feature-icon">{{ icon("shield") }}</span>
+      <div><h3>Gmail stays authoritative</h3><p>No sending, deleting, or archiving. Opening a message in Mercury doesn't change Gmail's unread state, and native label sync is off unless you turn it on.</p></div>
+    </article>
+  </div>
+</section>
+</div>
+
+<section class="section-m" id="privacy" aria-labelledby="promise-title">
+  <div class="promise" data-reveal>
+    <p class="eyebrow">Our privacy promise</p>
+    <h2 id="promise-title">Honest about what's kept</h2>
+    <blockquote class="promise-quote">Mercury keeps the information needed to organize your inbox. Full message bodies are fetched when needed rather than retained in Mercury's database. AI processing and provider retention are explained before connection.</blockquote>
+    <div class="promise-grid">
+      <div>
+        <h3>{{ icon("database", "icon-sm") }} Kept while connected</h3>
+        <ul>
+          <li>Selected metadata: senders, subjects, dates, labels</li>
+          <li>Summaries, possible actions, and embeddings</li>
+          <li>Your buckets, moves, and sender rules</li>
+          <li>Google authorization, encrypted</li>
+        </ul>
+      </div>
+      <div>
+        <h3>{{ icon("eye-off", "icon-sm") }} Not stored by Mercury</h3>
+        <ul>
+          <li>Full message bodies or raw email</li>
+          <li>Attachments — they stay in Gmail</li>
+          <li>Email content in your browser's storage</li>
+          <li>Prompts sent to the AI provider</li>
+        </ul>
+      </div>
+      <div>
+        <h3>{{ icon("unplug", "icon-sm") }} When you leave</h3>
+        <ul>
+          <li>Disconnect stops processing and removes derived mailbox data</li>
+          <li>Account deletion also removes your profile</li>
+          <li>Backups expire on a bounded schedule</li>
+        </ul>
+      </div>
+    </div>
+    <p class="promise-note">Mercury is not end-to-end encrypted or zero-knowledge, and it doesn't claim Google approval or certification. <a href="{{ url_for('public.privacy') }}">Read the full privacy details</a>.</p>
+  </div>
+</section>
+
+<section class="cta-band" aria-labelledby="cta-title">
+  <div class="cta-card" data-reveal>
+    <div>
+      <h2 id="cta-title">See your inbox, calmer.</h2>
+      <p>{% if config.AUTH_MODE == 'dev' %}Try the full workspace with invented messages — no Google account needed.{% else %}Sign in, review the disclosure, and decide whether to connect.{% endif %}</p>
+    </div>
+    {{ primary_cta(False) }}
+  </div>
 </section>
 {% endblock %}
-

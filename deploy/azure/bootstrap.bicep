@@ -3,7 +3,7 @@ param registryName string
 
 param location string = resourceGroup().location
 
-resource registry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = {
+resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: registryName
   location: location
   sku: {

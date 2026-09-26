@@ -71,9 +71,25 @@ def longdate(value: datetime | None) -> str:
 def _workspace_query(bucket_id: uuid.UUID | None = None, view: str = "overview"):
     query = (
         select(EmailThread, ThreadAnalysis, BucketAssignment, Bucket)
-        .outerjoin(ThreadAnalysis, ThreadAnalysis.thread_id == EmailThread.id)
-        .outerjoin(BucketAssignment, BucketAssignment.thread_id == EmailThread.id)
-        .outerjoin(Bucket, Bucket.id == BucketAssignment.bucket_id)
+        # Every joined row is owner-filtered too, in addition to the composite tenant FKs.
+        .outerjoin(
+            ThreadAnalysis,
+            and_(
+                ThreadAnalysis.thread_id == EmailThread.id,
+                ThreadAnalysis.user_id == current_user.id,
+            ),
+        )
+        .outerjoin(
+            BucketAssignment,
+            and_(
+                BucketAssignment.thread_id == EmailThread.id,
+                BucketAssignment.user_id == current_user.id,
+            ),
+        )
+        .outerjoin(
+            Bucket,
+            and_(Bucket.id == BucketAssignment.bucket_id, Bucket.user_id == current_user.id),
+        )
         .where(EmailThread.user_id == current_user.id)
         .order_by(EmailThread.latest_message_at.desc(), EmailThread.id)
         .limit(100)
@@ -293,7 +309,9 @@ def move(thread_id):
             thread_id=thread_id,
             bucket_id=bucket_id,
         )
-    flash("Conversation moved. Mercury will keep it there.", "success")
+    if request.headers.get("X-Mercury-Bulk") != "1":
+        # Bulk moves show one summary toast client-side instead of one flash per thread.
+        flash("Conversation moved. Mercury will keep it there.", "success")
     return redirect(url_for("inbox.thread_reader", thread_id=thread_id))
 
 
@@ -314,7 +332,9 @@ def action(thread_id):
     if not form.validate_on_submit():
         abort(400)
     analysis = db.session.scalar(
-        select(ThreadAnalysis).where(ThreadAnalysis.thread_id == thread.id)
+        select(ThreadAnalysis).where(
+            ThreadAnalysis.thread_id == thread.id, ThreadAnalysis.user_id == current_user.id
+        )
     )
     if analysis is None:
         abort(409)

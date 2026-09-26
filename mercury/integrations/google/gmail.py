@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 from datetime import UTC, datetime
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parsedate_to_datetime
@@ -113,7 +114,11 @@ class GmailProvider:
                 db.session.rollback()
                 raise ReauthorizationRequired("connection_needs_reauthorization")
             try:
-                credentials.refresh(Request(timeout=current_app.config["PROVIDER_TIMEOUT_SECONDS"]))
+                credentials.refresh(
+                    functools.partial(
+                        Request(), timeout=current_app.config["PROVIDER_TIMEOUT_SECONDS"]
+                    )
+                )
             except RefreshError as error:
                 if error.retryable:
                     db.session.rollback()

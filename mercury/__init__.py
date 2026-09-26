@@ -109,6 +109,7 @@ def create_app(config_overrides=None) -> Flask:
     @app.errorhandler(401)
     @app.errorhandler(403)
     @app.errorhandler(404)
+    @app.errorhandler(409)
     def safe_client_error(error):
         if isinstance(error, SecurityError):
             # Routing has no trusted URL adapter for a rejected Host header, so this
@@ -120,6 +121,10 @@ def create_app(config_overrides=None) -> Flask:
     def safe_server_error(error):
         app.logger.error("request_failed", extra={"event_type": "request_failed"})
         return render_template("errors/error.html", code=500), 500
+
+    @app.errorhandler(503)
+    def safe_unavailable(error):
+        return render_template("errors/error.html", code=503), 503
 
     return app
 
