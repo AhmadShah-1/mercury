@@ -17,13 +17,14 @@ def _message(
     mime_type: str = "text/plain",
     labels: tuple[str, ...] = ("INBOX",),
     attachment: bool = False,
+    recipients: tuple[str, ...] = ("alex@example.invalid",),
 ) -> ProviderMessage:
     return ProviderMessage(
         id=ident,
         internet_message_id=f"<{ident}@fixtures.invalid>",
         sender_name=name,
         sender_address=sender,
-        recipients=("alex@example.invalid",),
+        recipients=recipients,
         sent_at=datetime(2026, 9, day, 14, 30, tzinfo=UTC),
         labels=labels,
         mime_type=mime_type,
@@ -127,6 +128,53 @@ FIXTURE_THREADS: tuple[ProviderThread, ...] = (
             ),
         ),
     ),
+    ProviderThread(
+        id="fixture-conversation-reopened",
+        subject="Workshop room confirmation",
+        snippet="A new request arrived after an earlier reply.",
+        unread=True,
+        messages=(
+            _message(
+                "msg-conversation-1",
+                "jules@lantern-studio.invalid",
+                "Jules Martin",
+                "Could you confirm the room for Tuesday's workshop?",
+                13,
+            ),
+            _message(
+                "msg-conversation-2",
+                "alex@example.invalid",
+                "Alex Mercury",
+                "Confirmed: we are in the Cedar room.",
+                14,
+                labels=("SENT",),
+                recipients=("jules@lantern-studio.invalid",),
+            ),
+            _message(
+                "msg-conversation-3",
+                "jules@lantern-studio.invalid",
+                "Jules Martin",
+                "Thanks. Could you also confirm whether the projector is available?",
+                15,
+                labels=("INBOX", "UNREAD"),
+            ),
+        ),
+    ),
+    ProviderThread(
+        id="fixture-malformed-large",
+        subject="Malformed long-form fixture",
+        snippet="A bounded-reader and malformed-HTML fixture.",
+        messages=(
+            _message(
+                "msg-malformed-1",
+                "qa@copper-fern.invalid",
+                "Copper Fern QA",
+                "<html><body><p>Malformed fixture start<div>" + ("invented text " * 20_000),
+                12,
+                mime_type="text/html",
+            ),
+        ),
+    ),
 )
 
 
@@ -142,3 +190,6 @@ class FakeGmailProvider:
             if thread.id == thread_id:
                 return thread
         raise LookupError("message_deleted")
+
+    def get_thread_metadata(self, thread_id: str) -> ProviderThread:
+        return self.get_thread(thread_id)

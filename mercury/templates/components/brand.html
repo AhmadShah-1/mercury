@@ -1,0 +1,25 @@
+{#- Mercury mark: a quicksilver planet with a fast orbit and three motion lines.
+    Colors come from CSS custom properties so the mark follows the active theme. -#}
+{% macro mark(size=30, uid="m") -%}
+<svg class="brand-mark" viewBox="0 0 40 40" width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="qs-disc-{{ uid }}" x1="14" y1="9" x2="33" y2="31" gradientUnits="userSpaceOnUse">
+      <stop offset="0" class="mark-stop-hi"/>
+      <stop offset="0.48" class="mark-stop-mid"/>
+      <stop offset="0.52" class="mark-stop-band"/>
+      <stop offset="1" class="mark-stop-lo"/>
+    </linearGradient>
+    <clipPath id="qs-front-{{ uid }}">
+      <rect x="-4" y="20" width="56" height="30" transform="rotate(-18 24 20)"/>
+    </clipPath>
+  </defs>
+  <path class="mark-lines" d="M3.5 14.5h8M1.5 20h8.5M3.5 25.5h8" fill="none" stroke-width="2.2" stroke-linecap="round"/>
+  <ellipse class="mark-orbit mark-orbit-back" cx="24" cy="20" rx="15" ry="5.2" transform="rotate(-18 24 20)" fill="none" stroke-width="1.6"/>
+  <circle class="mark-disc" cx="24" cy="20" r="10.5" fill="url(#qs-disc-{{ uid }})" stroke-width="1.6"/>
+  <ellipse class="mark-orbit" cx="24" cy="20" rx="15" ry="5.2" transform="rotate(-18 24 20)" fill="none" stroke-width="1.8" clip-path="url(#qs-front-{{ uid }})"/>
+</svg>
+{%- endmacro %}
+
+{% macro wordmark(href, uid="top", size=30) -%}
+<a class="brand" href="{{ href }}">{{ mark(size, uid) }}<span class="wordmark">Mercury</span></a>
+{%- endmacro %}

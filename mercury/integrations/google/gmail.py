@@ -5,14 +5,33 @@ from datetime import UTC, datetime
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parsedate_to_datetime
 
+import httplib2
 from flask import current_app
+from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from sqlalchemy import select
 
 from mercury.accounts.models import GmailAccount
 from mercury.extensions import db
-from mercury.integrations.types import MailProfile, ProviderMessage, ProviderThread
+from mercury.integrations.types import (
+    MailProfile,
+    ProviderMessage,
+    ProviderThread,
+    ProviderUnavailable,
+    ReauthorizationRequired,
+)
+
+
+def _retry_after(error: HttpError) -> int | None:
+    value = getattr(error.resp, "get", lambda _name: None)("retry-after")
+    try:
+        return max(0, min(int(value), 3600)) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 class GmailProvider:
@@ -20,31 +39,110 @@ class GmailProvider:
         self.account = account
         cipher = current_app.extensions["mercury"]["token_cipher"]
         bundle = cipher.decrypt(account.encrypted_token_bundle or "")
-        self.credentials = Credentials(
+        self.credentials = self._credentials_from_bundle(bundle, account.granted_scopes)
+        self.service = self._build_service(self.credentials)
+
+    @staticmethod
+    def _build_service(credentials: Credentials):
+        # A finite socket timeout bounds every Gmail call made by web or worker code.
+        http = httplib2.Http(timeout=current_app.config["PROVIDER_TIMEOUT_SECONDS"])
+        return build(
+            "gmail", "v1", http=AuthorizedHttp(credentials, http=http), cache_discovery=False
+        )
+
+    @staticmethod
+    def _execute(request, *, translate_not_found: bool = True):
+        """Execute one Gmail request, translating provider failures into safe error types."""
+        try:
+            return request.execute(num_retries=1)
+        except HttpError as error:
+            status = getattr(error.resp, "status", None)
+            if status == 404 and translate_not_found:
+                raise LookupError("provider_resource_not_found") from None
+            if status == 401:
+                raise ReauthorizationRequired("connection_needs_reauthorization") from None
+            if status == 429:
+                raise ProviderUnavailable(
+                    "provider_rate_limited", retry_after=_retry_after(error)
+                ) from None
+            if status is not None and int(status) >= 500:
+                raise ProviderUnavailable(retry_after=_retry_after(error)) from None
+            raise
+        except (TimeoutError, OSError, httplib2.HttpLib2Error, TransportError):
+            raise ProviderUnavailable("provider_timeout") from None
+
+    @staticmethod
+    def _credentials_from_bundle(bundle: dict, granted_scopes: list[str]) -> Credentials:
+        expires_at = bundle.get("expires_at")
+        expiry = (
+            datetime.fromtimestamp(float(expires_at), UTC).replace(tzinfo=None)
+            if expires_at
+            else None
+        )
+        return Credentials(
             token=bundle.get("access_token") or bundle.get("token"),
             refresh_token=bundle.get("refresh_token"),
             token_uri=bundle.get("token_uri", "https://oauth2.googleapis.com/token"),
             client_id=current_app.config["GOOGLE_CLIENT_ID"],
             client_secret=current_app.config["GOOGLE_CLIENT_SECRET"],
-            scopes=account.granted_scopes,
+            scopes=granted_scopes,
+            expiry=expiry,
         )
-        self.service = build("gmail", "v1", credentials=self.credentials, cache_discovery=False)
 
     def _persist_refresh(self) -> None:
-        if self.credentials.expired and self.credentials.refresh_token:
-            self.credentials.refresh(Request())
-            cipher = current_app.extensions["mercury"]["token_cipher"]
-            previous = cipher.decrypt(self.account.encrypted_token_bundle or "")
+        """Refresh an unusable access token under a row lock so concurrent refreshes serialize.
+
+        Another process may already have refreshed and stored a newer token while this one
+        waited for the lock; that stored token is reused instead of refreshing again.
+        """
+        if self.credentials.valid:
+            return
+        if not self.credentials.refresh_token:
+            raise ReauthorizationRequired("connection_needs_reauthorization")
+        cipher = current_app.extensions["mercury"]["token_cipher"]
+        locked = db.session.scalar(
+            select(GmailAccount).where(GmailAccount.id == self.account.id).with_for_update()
+        )
+        if locked is None or locked.connection_state != "connected":
+            db.session.rollback()
+            raise ReauthorizationRequired("connection_needs_reauthorization")
+        previous = cipher.decrypt(locked.encrypted_token_bundle or "")
+        credentials = self._credentials_from_bundle(previous, locked.granted_scopes)
+        if not credentials.valid:
+            if not credentials.refresh_token:
+                db.session.rollback()
+                raise ReauthorizationRequired("connection_needs_reauthorization")
+            try:
+                credentials.refresh(Request(timeout=current_app.config["PROVIDER_TIMEOUT_SECONDS"]))
+            except RefreshError as error:
+                if error.retryable:
+                    db.session.rollback()
+                    raise ProviderUnavailable() from None
+                # invalid_grant and other permanent refresh failures require reconnection.
+                locked.connection_state = "reconnect_required"
+                db.session.commit()
+                raise ReauthorizationRequired("connection_needs_reauthorization") from None
+            except TransportError:
+                db.session.rollback()
+                raise ProviderUnavailable("provider_timeout") from None
             previous.update(
-                access_token=self.credentials.token,
-                refresh_token=self.credentials.refresh_token or previous.get("refresh_token"),
+                access_token=credentials.token,
+                refresh_token=credentials.refresh_token or previous.get("refresh_token"),
+                expires_at=(
+                    int(credentials.expiry.replace(tzinfo=UTC).timestamp())
+                    if credentials.expiry
+                    else previous.get("expires_at")
+                ),
             )
-            self.account.encrypted_token_bundle = cipher.encrypt(previous)
-            db.session.commit()
+            locked.encrypted_token_bundle = cipher.encrypt(previous)
+        self.account = locked
+        self.credentials = credentials
+        self.service = self._build_service(self.credentials)
+        db.session.commit()
 
     def profile(self) -> MailProfile:
         self._persist_refresh()
-        result = self.service.users().getProfile(userId="me").execute()
+        result = self._execute(self.service.users().getProfile(userId="me"))
         return MailProfile(
             self.account.provider_subject, result["emailAddress"], str(result["historyId"])
         )
@@ -55,26 +153,27 @@ class GmailProvider:
         token = None
         query = f"after:{after_epoch} -in:spam -in:trash -label:drafts"
         while len(found) < limit:
-            page = (
+            page = self._execute(
                 self.service.users()
                 .threads()
                 .list(
                     userId="me", q=query, maxResults=min(100, limit - len(found)), pageToken=token
                 )
-                .execute()
             )
             for item in page.get("threads", []):
-                raw = (
-                    self.service.users()
-                    .threads()
-                    .get(
-                        userId="me",
-                        id=item["id"],
-                        format="metadata",
-                        metadataHeaders=["Subject", "From", "To", "Date", "Message-ID"],
+                try:
+                    raw = self._execute(
+                        self.service.users()
+                        .threads()
+                        .get(
+                            userId="me",
+                            id=item["id"],
+                            format="metadata",
+                            metadataHeaders=["Subject", "From", "To", "Date", "Message-ID"],
+                        )
                     )
-                    .execute()
-                )
+                except LookupError:
+                    continue  # Deleted between list and get; the next sync reconciles it.
                 found.append(self._normalize_thread(raw, include_body=False))
             token = page.get("nextPageToken")
             if not token:
@@ -83,8 +182,24 @@ class GmailProvider:
 
     def get_thread(self, thread_id: str) -> ProviderThread:
         self._persist_refresh()
-        raw = self.service.users().threads().get(userId="me", id=thread_id, format="full").execute()
+        raw = self._execute(
+            self.service.users().threads().get(userId="me", id=thread_id, format="full")
+        )
         return self._normalize_thread(raw, include_body=True)
+
+    def get_thread_metadata(self, thread_id: str) -> ProviderThread:
+        self._persist_refresh()
+        raw = self._execute(
+            self.service.users()
+            .threads()
+            .get(
+                userId="me",
+                id=thread_id,
+                format="metadata",
+                metadataHeaders=["Subject", "From", "To", "Date", "Message-ID"],
+            )
+        )
+        return self._normalize_thread(raw, include_body=False)
 
     @staticmethod
     def _header(payload: dict, name: str) -> str:
@@ -172,24 +287,32 @@ class GmailProvider:
         )
 
     def list_history(self, start_history_id: str, page_token: str | None = None) -> dict:
-        return (
+        self._persist_refresh()
+        # An expired checkpoint returns HTTP 404; sync.py handles that HttpError explicitly.
+        return self._execute(
             self.service.users()
             .history()
-            .list(userId="me", startHistoryId=start_history_id, pageToken=page_token)
-            .execute()
+            .list(userId="me", startHistoryId=start_history_id, pageToken=page_token),
+            translate_not_found=False,
         )
 
     def watch(self, topic_name: str) -> dict:
-        return self.service.users().watch(userId="me", body={"topicName": topic_name}).execute()
+        self._persist_refresh()
+        return self._execute(
+            self.service.users().watch(userId="me", body={"topicName": topic_name})
+        )
 
     def stop_watch(self) -> None:
-        self.service.users().stop(userId="me").execute()
+        self._persist_refresh()
+        self._execute(self.service.users().stop(userId="me"))
 
     def list_labels(self) -> list[dict]:
-        return self.service.users().labels().list(userId="me").execute().get("labels", [])
+        self._persist_refresh()
+        return self._execute(self.service.users().labels().list(userId="me")).get("labels", [])
 
     def create_label(self, name: str) -> str:
-        result = (
+        self._persist_refresh()
+        result = self._execute(
             self.service.users()
             .labels()
             .create(
@@ -200,11 +323,13 @@ class GmailProvider:
                     "messageListVisibility": "show",
                 },
             )
-            .execute()
         )
         return result["id"]
 
     def apply_label(self, thread_id: str, *, add: list[str], remove: list[str]) -> None:
-        self.service.users().threads().modify(
-            userId="me", id=thread_id, body={"addLabelIds": add, "removeLabelIds": remove}
-        ).execute()
+        self._persist_refresh()
+        self._execute(
+            self.service.users()
+            .threads()
+            .modify(userId="me", id=thread_id, body={"addLabelIds": add, "removeLabelIds": remove})
+        )

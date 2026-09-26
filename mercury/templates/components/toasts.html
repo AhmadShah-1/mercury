@@ -1,0 +1,15 @@
+{#- Flash messages rendered as toasts. With `oob=True` (HTMX partials) they are appended to
+    the existing stack via an out-of-band swap. Messages are static strings set by routes. -#}
+{% from "components/icons.html" import icon %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if oob %}{% if messages %}<div id="toast-stack" hx-swap-oob="beforeend">{% endif %}{% else %}<div class="toast-stack" id="toast-stack" aria-live="polite" aria-relevant="additions">{% endif %}
+  {% for category, message in messages %}
+  {% set tone = category if category in ["success", "danger", "warning", "info"] else "info" %}
+  <div class="toast-m toast-{{ tone }}" role="{{ 'alert' if tone == 'danger' else 'status' }}" data-toast{% if tone in ['success', 'info'] %} data-autodismiss{% endif %}>
+    <span class="toast-icon">{{ icon({"success": "check-circle", "danger": "alert-circle", "warning": "alert", "info": "info"}[tone]) }}</span>
+    <p class="toast-text">{{ message }}</p>
+    <button type="button" class="toast-close" data-toast-close aria-label="Dismiss notification">{{ icon("x", "icon-sm") }}</button>
+  </div>
+  {% endfor %}
+{% if not oob or messages %}</div>{% endif %}
+{% endwith %}

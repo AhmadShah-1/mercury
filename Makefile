@@ -1,17 +1,32 @@
 COMPOSE := docker compose -f deploy/compose.yaml
-DEMO_ENV := APP_ENV=development APP_BASE_URL=http://localhost:5000 AUTH_MODE=dev MAIL_MODE=fake AI_PROVIDER=fake SYNC_MODE=manual
+DEMO_ENV := APP_ENV=development APP_BASE_URL=http://localhost:5000 AUTH_MODE=dev MAIL_MODE=fake AI_PROVIDER=fake SYNC_MODE=manual DEBUG=false
 
-.PHONY: demo bootstrap dev migrate seed-demo test lint security logs down vendor
+.PHONY: demo demo-smoke worker-once bootstrap dev migrate seed-demo test lint security logs down reset-local vendor
 
 vendor:
 	poetry run python scripts/fetch_vendor_assets.py
 
+# `compose run` never rebuilds an existing image, so build explicitly before migrating.
 demo:
-	$(DEMO_ENV) $(COMPOSE) up -d --build db
+	$(DEMO_ENV) $(COMPOSE) build web
+	$(DEMO_ENV) $(COMPOSE) up -d --wait db
 	$(DEMO_ENV) $(COMPOSE) run --rm web flask --app wsgi:app db upgrade
 	$(DEMO_ENV) $(COMPOSE) run --rm web procrastinate --app=mercury.jobs.cli.app schema --apply
 	$(DEMO_ENV) $(COMPOSE) run --rm web flask --app wsgi:app seed-demo
-	$(DEMO_ENV) $(COMPOSE) up -d web worker
+	$(DEMO_ENV) $(COMPOSE) up -d --wait web worker
+	@echo "Mercury synthetic demo: http://localhost:5000"
+
+# Probe the running demo without a browser: health, static assets, and worker liveness.
+demo-smoke:
+	curl -fsS http://localhost:5000/health/live >/dev/null
+	curl -fsS http://localhost:5000/health/ready >/dev/null
+	test "$$(curl -fsS http://localhost:5000/static/vendor/htmx.min.js | wc -c)" -gt 10000
+	test "$$($(COMPOSE) ps --status running --format '{{.Service}}' | grep -c -x -E 'web|worker|db')" -eq 3
+	@echo "demo smoke checks passed"
+
+# Drain currently runnable jobs once in a throwaway worker container, then exit.
+worker-once:
+	$(DEMO_ENV) $(COMPOSE) run --rm worker procrastinate --app=mercury.jobs.cli.app worker --one-shot
 
 bootstrap:
 	@command -v poetry >/dev/null || (echo "Poetry is required" && exit 1)
@@ -33,8 +48,10 @@ seed-demo:
 	$(DEMO_ENV) $(COMPOSE) run --rm web flask --app wsgi:app seed-demo
 
 test:
-	APP_ENV=testing $(COMPOSE) --profile test up -d test-db
-	APP_ENV=testing APP_BASE_URL=http://localhost:5000 AUTH_MODE=dev MAIL_MODE=fake AI_PROVIDER=fake SYNC_MODE=manual DATABASE_URL=postgresql+psycopg://mercury:mercury_test@localhost:55433/mercury_test poetry run pytest
+	APP_ENV=testing $(COMPOSE) --profile test up -d --wait test-db
+	APP_ENV=testing APP_BASE_URL=http://localhost:5000 AUTH_MODE=dev MAIL_MODE=fake AI_PROVIDER=fake SYNC_MODE=manual DEBUG=false DATABASE_URL=postgresql+psycopg://mercury:mercury_test@localhost:55433/mercury_test poetry run flask --app wsgi:app db upgrade
+	APP_ENV=testing APP_BASE_URL=http://localhost:5000 AUTH_MODE=dev MAIL_MODE=fake AI_PROVIDER=fake SYNC_MODE=manual DEBUG=false DATABASE_URL=postgresql+psycopg://mercury:mercury_test@localhost:55433/mercury_test poetry run procrastinate --app=mercury.jobs.cli.app schema --apply
+	APP_ENV=testing APP_BASE_URL=http://localhost:5000 AUTH_MODE=dev MAIL_MODE=fake AI_PROVIDER=fake SYNC_MODE=manual DEBUG=false DATABASE_URL=postgresql+psycopg://mercury:mercury_test@localhost:55433/mercury_test poetry run pytest
 
 lint:
 	poetry run ruff check .
@@ -50,3 +67,8 @@ logs:
 down:
 	$(COMPOSE) down
 
+# Destructive: deletes the local synthetic database volume after an explicit confirmation.
+reset-local:
+	@printf "This deletes the local Mercury database volume. Type 'reset' to continue: "; \
+	read answer; [ "$$answer" = "reset" ] || (echo "aborted"; exit 1)
+	$(COMPOSE) down --volumes

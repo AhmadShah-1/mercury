@@ -16,6 +16,8 @@ services:
     volumes:
       - mercury_pgdata:/var/lib/postgresql/data
   web:
+    # web and worker run the same locally built image with different commands.
+    image: mercury:local
     build:
       context: ..
       dockerfile: deploy/Dockerfile
@@ -23,6 +25,8 @@ services:
       APP_ENV: ${APP_ENV:-development}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5000}
       RELEASE_ID: ${RELEASE_ID:-development}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}
+      DEBUG: ${DEBUG:-false}
       DATABASE_URL: postgresql+psycopg://mercury:mercury_local@db:5432/mercury
       AUTH_MODE: ${AUTH_MODE:-dev}
       MAIL_MODE: ${MAIL_MODE:-fake}
@@ -33,17 +37,41 @@ services:
       TOKEN_ENCRYPTION_KEYS: ${TOKEN_ENCRYPTION_KEYS:-AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_PROJECT_ID: ${GOOGLE_PROJECT_ID:-}
+      PUBSUB_TOPIC: ${PUBSUB_TOPIC:-}
+      PUBSUB_SUBSCRIPTION: ${PUBSUB_SUBSCRIPTION:-}
+      PUBSUB_PUSH_SERVICE_ACCOUNT: ${PUBSUB_PUSH_SERVICE_ACCOUNT:-}
+      PUBSUB_AUDIENCE: ${PUBSUB_AUDIENCE:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SUMMARY_MODEL: ${SUMMARY_MODEL:-gpt-4.1-mini-2025-04-14}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      AI_SUMMARY_INPUT_USD_PER_MILLION: ${AI_SUMMARY_INPUT_USD_PER_MILLION:-}
+      AI_SUMMARY_OUTPUT_USD_PER_MILLION: ${AI_SUMMARY_OUTPUT_USD_PER_MILLION:-}
+      AI_EMBEDDING_INPUT_USD_PER_MILLION: ${AI_EMBEDDING_INPUT_USD_PER_MILLION:-}
+      AI_GLOBAL_MONTHLY_BUDGET_USD: ${AI_GLOBAL_MONTHLY_BUDGET_USD:-50}
+      AI_ACCOUNT_MONTHLY_BUDGET_USD: ${AI_ACCOUNT_MONTHLY_BUDGET_USD:-3}
+      AI_ACCOUNT_DAILY_THREAD_LIMIT: ${AI_ACCOUNT_DAILY_THREAD_LIMIT:-100}
+      AI_ONBOARDING_THREAD_LIMIT: ${AI_ONBOARDING_THREAD_LIMIT:-500}
+      ADDITIONAL_TRUSTED_HOSTS: ${ADDITIONAL_TRUSTED_HOSTS:-}
+      PROXY_HOPS: ${PROXY_HOPS:-0}
       DOPPLER_TOKEN: ${DOPPLER_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "127.0.0.1:5000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=3)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
   worker:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    image: mercury:local
+    pull_policy: never
     environment: *app_environment
     command: ["python", "-m", "mercury.jobs.worker"]
     depends_on:
@@ -67,4 +95,3 @@ services:
       retries: 30
 volumes:
   mercury_pgdata:
-

@@ -1,0 +1,61 @@
+{% from "components/icons.html" import icon %}
+{% from "components/ui.html" import badge, action_label, action_icon %}
+
+{#- AI state for one thread: ready | stale | pending | paused | disabled -#}
+{% macro ai_state(thread, analysis, account) -%}
+{%- if analysis and analysis.stale -%}stale
+{%- elif analysis -%}ready
+{%- elif not account or not account.ai_consent or not config.AI_PROCESSING_ENABLED -%}disabled
+{%- elif thread.processing_state == "budget_paused" -%}paused
+{%- else -%}pending
+{%- endif -%}
+{%- endmacro %}
+
+{% macro thread_row(thread, analysis, assignment, bucket, account, oob=False, current=False) %}
+{%- set sender = thread.participants[-1] if thread.participants else {} -%}
+{%- set state = ai_state(thread, analysis, account)|trim -%}
+{%- set opened = thread.last_opened_at is not none -%}
+<li class="thread-row{% if thread.gmail_unread %} is-unread{% endif %}{% if not opened %} is-new{% endif %}{% if current %} is-current{% endif %}" id="thread-{{ thread.id }}" data-thread-row data-move-url="{{ url_for('inbox.move', thread_id=thread.id) }}"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <label class="row-select js-only">
+    <input type="checkbox" class="form-check-input" data-row-select value="{{ thread.id }}">
+    <span class="visually-hidden">Select “{{ thread.subject }}”</span>
+  </label>
+  <a class="row-link" href="{{ url_for('inbox.thread_reader', thread_id=thread.id) }}" data-reader-link{% if current %} aria-current="true"{% endif %}>
+    <span class="row-top">
+      <span class="row-sender">
+        {%- if thread.gmail_unread %}<span class="unread-dot" aria-hidden="true"></span>{% endif -%}
+        {{ sender.get("name") or sender.get("address") or "Unknown sender" }}
+      </span>
+      <time class="row-time" datetime="{{ thread.latest_message_at.isoformat() }}" data-localtime="short">{{ thread.latest_message_at|shortdate }}</time>
+    </span>
+    <span class="row-subject">{{ thread.subject }}</span>
+    <span class="row-summary">
+      {%- if state in ["ready", "stale"] -%}
+        <span class="ai-tag" title="AI summary">AI<span class="visually-hidden"> summary:</span></span> {{ analysis.summary }}
+      {%- elif state == "paused" -%}
+        <span class="row-pending">{{ icon("pause", "icon-xs") }} Summary paused: AI budget reached.</span> {{ thread.snippet }}
+      {%- elif state == "disabled" -%}
+        <span class="row-snippet"><span class="visually-hidden">Gmail preview: </span>{{ thread.snippet or "No preview available." }}</span>
+      {%- else -%}
+        <span class="row-pending">{{ icon("clock", "icon-xs") }} Summary pending.</span> {{ thread.snippet }}
+      {%- endif -%}
+    </span>
+    <span class="row-meta">
+      {%- if bucket and not bucket.archived -%}
+        {{ badge(bucket.name, "bucket", "folder", sr_prefix="Bucket:") }}
+      {%- else -%}
+        {{ badge("Unsorted", "muted", "unsorted", sr_prefix="Bucket:") }}
+      {%- endif -%}
+      {%- if thread.gmail_unread %}{{ badge("Unread in Gmail", "unread", "mail") }}{% endif -%}
+      {%- if not opened %}{{ badge("New in Mercury", "new", "ring", title="Not opened in Mercury yet") }}{% endif -%}
+      {%- if analysis and analysis.action_required -%}
+        {%- if analysis.action_status == "open" -%}{{ badge(action_label(analysis.action_type), "action", action_icon(analysis.action_type), sr_prefix="Possible action:") }}
+        {%- elif analysis.action_status == "handled" -%}{{ badge("Handled in Mercury", "success", "check") }}
+        {%- endif -%}
+      {%- endif -%}
+      {%- if state == "stale" %}{{ badge("Summary outdated", "warning", "history") }}{% endif -%}
+      {%- if thread.attachment_present %}{{ badge("Attachment", "muted", "paperclip", title="Attachments are available in Gmail") }}{% endif -%}
+    </span>
+  </a>
+</li>
+{%- endmacro %}

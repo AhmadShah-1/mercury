@@ -58,6 +58,7 @@ def start_flow(*, purpose: str, user: User | None, gmail_modify: bool = False):
     )
     db.session.add(attempt)
     db.session.commit()
+    session["google_oauth_purpose"] = purpose
     scopes = GMAIL_READ_SCOPES + (" " + GMAIL_MODIFY_SCOPE if gmail_modify else "")
     redirect_uri = (
         current_app.config["GOOGLE_LOGIN_REDIRECT_URI"]

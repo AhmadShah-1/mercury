@@ -26,3 +26,17 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
         raise ValueError("incompatible embeddings")
     denominator = float(np.linalg.norm(a) * np.linalg.norm(b))
     return float(np.dot(a, b) / denominator) if denominator else 0.0
+
+
+def conservative_choice(
+    scores: list[tuple[str, float]], *, minimum: float, margin: float
+) -> str | None:
+    """Return the best bucket only when both measured thresholds are satisfied."""
+    if not scores:
+        return None
+    ranked = sorted(scores, key=lambda item: (-item[1], item[0]))
+    best_id, best_score = ranked[0]
+    next_score = ranked[1][1] if len(ranked) > 1 else -1.0
+    if best_score < minimum or best_score - next_score < margin:
+        return None
+    return best_id

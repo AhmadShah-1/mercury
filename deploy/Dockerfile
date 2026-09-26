@@ -16,14 +16,16 @@ FROM python:3.12.12-slim-bookworm AS runtime
 ENV PATH="/app/.venv/bin:${PATH}" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 RUN addgroup --system mercury && adduser --system --ingroup mercury --home /nonexistent mercury
-COPY --from=doppler /usr/local/bin/doppler /usr/local/bin/doppler
+COPY --from=doppler /bin/doppler /usr/local/bin/doppler
 COPY --from=builder /app/.venv /app/.venv
 COPY --chown=mercury:mercury mercury ./mercury
+# Always ship the SHA-384-verified vendor assets fetched in the builder, never source placeholders.
+COPY --from=builder --chown=mercury:mercury /app/mercury/static/vendor ./mercury/static/vendor
 COPY --chown=mercury:mercury migrations ./migrations
 COPY --chown=mercury:mercury deploy/entrypoint.sh deploy/gunicorn.conf.py ./deploy/
 COPY --chown=mercury:mercury wsgi.py pyproject.toml README.md ./
+RUN chmod 0755 /app/deploy/entrypoint.sh
 USER mercury
 EXPOSE 8000
 ENTRYPOINT ["/app/deploy/entrypoint.sh"]
 CMD ["gunicorn", "--config", "deploy/gunicorn.conf.py", "wsgi:app"]
-

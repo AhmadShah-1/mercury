@@ -31,5 +31,10 @@ class ConfirmDeleteForm(FlaskForm):
     submit = SubmitField("Delete my Mercury account")
 
 
+class LabelSyncForm(FlaskForm):
+    enabled = BooleanField("Apply Mercury-owned labels in Gmail")
+    submit = SubmitField("Save label preference")
+
+
 class ReturnPathForm(FlaskForm):
     next = HiddenField()

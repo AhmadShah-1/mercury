@@ -58,4 +58,14 @@ def pubsub_push():
         return jsonify(status="ignored")
     account.pending_sync = True
     db.session.commit()
+    try:
+        from mercury.jobs.tasks import enqueue_sync
+
+        enqueue_sync(current_app.extensions["mercury"]["queue"], account)
+    except Exception:
+        # Durable pending_sync is the source of truth; the periodic reconciler
+        # closes the database-commit / queue-publication gap.
+        current_app.logger.warning(
+            "pubsub_enqueue_deferred", extra={"event_type": "pubsub_enqueue_deferred"}
+        )
     return jsonify(status="accepted"), 202

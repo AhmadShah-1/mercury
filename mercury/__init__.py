@@ -4,6 +4,7 @@ import logging
 
 from flask import Flask, abort, render_template, session
 from flask_login import current_user
+from werkzeug.exceptions import SecurityError
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from mercury.config import load_config
@@ -89,14 +90,15 @@ def create_app(config_overrides=None) -> Flask:
             abort(401)
 
     from mercury.accounts.routes import bp as accounts_bp
-    from mercury.admin.views import bp as admin_bp
+    from mercury.admin.views import init_admin
     from mercury.buckets.routes import bp as buckets_bp
     from mercury.inbox.routes import bp as inbox_bp
     from mercury.integrations.google.notifications import bp as notifications_bp
     from mercury.public.routes import bp as public_bp
 
-    for blueprint in (public_bp, accounts_bp, inbox_bp, buckets_bp, notifications_bp, admin_bp):
+    for blueprint in (public_bp, accounts_bp, inbox_bp, buckets_bp, notifications_bp):
         app.register_blueprint(blueprint)
+    init_admin(app)
 
     from mercury.commands import register_commands
 
@@ -108,6 +110,10 @@ def create_app(config_overrides=None) -> Flask:
     @app.errorhandler(403)
     @app.errorhandler(404)
     def safe_client_error(error):
+        if isinstance(error, SecurityError):
+            # Routing has no trusted URL adapter for a rejected Host header, so this
+            # response intentionally avoids template URL generation.
+            return "<!doctype html><title>Invalid request</title><h1>Invalid request</h1>", 400
         return render_template("errors/error.html", code=error.code), error.code
 
     @app.errorhandler(500)

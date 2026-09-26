@@ -50,6 +50,7 @@ def disconnect_account(user: User) -> None:
     account = db.session.scalar(select(GmailAccount).where(GmailAccount.user_id == user.id))
     if account is None:
         return
+    _revoke_watch(account)
     account.connection_state = "deleting"
     account.connection_generation += 1
     account.encrypted_token_bundle = None
@@ -72,6 +73,7 @@ def delete_user_account(user: User) -> None:
     user.active = False
     user.deletion_requested_at = datetime.now(UTC)
     if user.gmail_account:
+        _revoke_watch(user.gmail_account)
         user.gmail_account.connection_state = "deleting"
         user.gmail_account.connection_generation += 1
         user.gmail_account.encrypted_token_bundle = None
@@ -83,3 +85,19 @@ def delete_user_account(user: User) -> None:
         )
     )
     db.session.commit()
+
+
+def _revoke_watch(account: GmailAccount) -> None:
+    if (
+        current_app.config["MAIL_MODE"] != "gmail"
+        or not account.encrypted_token_bundle
+        or account.connection_state != "connected"
+    ):
+        return
+    try:
+        current_app.extensions["mercury"]["mail_provider"](account).stop_watch()
+    except Exception:
+        current_app.logger.warning(
+            "gmail_watch_revocation_failed",
+            extra={"event_type": "gmail_watch_revocation_failed"},
+        )

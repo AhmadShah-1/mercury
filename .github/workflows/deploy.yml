@@ -1,0 +1,95 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      resource_group:
+        description: Existing or approved Azure resource-group name
+        required: true
+        type: string
+      location:
+        description: Azure region
+        required: true
+        default: eastus
+        type: string
+      registry_name:
+        description: Globally unique lowercase ACR name
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: mercury-production
+  cancel-in-progress: false
+
+jobs:
+  build-scan-deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Create approved resource group
+        run: >-
+          az group create
+          --name '${{ inputs.resource_group }}'
+          --location '${{ inputs.location }}'
+          --only-show-errors
+      - name: Bootstrap private registry
+        run: >-
+          az deployment group create
+          --resource-group '${{ inputs.resource_group }}'
+          --template-file deploy/azure/bootstrap.bicep
+          --parameters registryName='${{ inputs.registry_name }}' location='${{ inputs.location }}'
+          --only-show-errors
+      - name: Build locked image once in ACR
+        run: >-
+          az acr build
+          --registry '${{ inputs.registry_name }}'
+          --image mercury:${{ github.sha }}
+          --file deploy/Dockerfile .
+          --only-show-errors
+      - name: Resolve immutable image digest
+        id: image
+        shell: bash
+        run: |
+          digest="$(az acr manifest show-metadata --registry '${{ inputs.registry_name }}' --name 'mercury:${{ github.sha }}' --query digest -o tsv)"
+          login_server="$(az acr show --name '${{ inputs.registry_name }}' --query loginServer -o tsv)"
+          echo "reference=${login_server}/mercury@${digest}" >> "$GITHUB_OUTPUT"
+      - name: Pull immutable image for scanning
+        run: |
+          az acr login --name '${{ inputs.registry_name }}'
+          docker pull '${{ steps.image.outputs.reference }}'
+      - uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ${{ steps.image.outputs.reference }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - name: Deploy infrastructure and immutable revision
+        run: >-
+          az deployment group create
+          --resource-group '${{ inputs.resource_group }}'
+          --template-file deploy/azure/main.bicep
+          --parameters
+          registryName='${{ inputs.registry_name }}'
+          location='${{ inputs.location }}'
+          image='${{ steps.image.outputs.reference }}'
+          dopplerToken='${{ secrets.DOPPLER_PRODUCTION_TOKEN }}'
+          postgresPassword='${{ secrets.POSTGRES_ADMIN_PASSWORD }}'
+          --only-show-errors
+      - name: Run controlled migrations
+        run: >-
+          az containerapp job start
+          --resource-group '${{ inputs.resource_group }}'
+          --name mercury-migrate
+          --wait
+          --only-show-errors

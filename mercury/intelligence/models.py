@@ -4,7 +4,15 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import (
+    Date,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,20 +40,29 @@ class UsageBucket(db.Model):
 
 class AIUsage(db.Model):
     __tablename__ = "ai_usage"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["thread_id", "user_id"],
+            ["email_threads.id", "email_threads.user_id"],
+            name="fk_ai_usage_thread_owner",
+            ondelete="CASCADE",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    thread_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("email_threads.id", ondelete="SET NULL")
-    )
+    thread_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     category: Mapped[str] = mapped_column(String(24), nullable=False)
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     input_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
     output_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    embedding_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
     input_rate: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False, default=0)
     output_rate: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False, default=0)
+    embedding_rate: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False, default=0)
+    reserved_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False, default=0)
     actual_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="reserved")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

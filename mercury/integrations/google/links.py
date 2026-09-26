@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlencode
 
 GMAIL_ORIGIN = "https://mail.google.com"
 
 
 def gmail_thread_url(mailbox: str, thread_id: str) -> str:
-    url = f"{GMAIL_ORIGIN}/mail/u/{quote(mailbox, safe='')}#all/{quote(thread_id, safe='')}"
-    assert urlsplit(url).netloc == "mail.google.com"
-    return url
+    return f"{GMAIL_ORIGIN}/mail/u/{quote(mailbox, safe='')}#all/{quote(thread_id, safe='')}"
 
 
 def gmail_message_search_url(mailbox: str, internet_message_id: str) -> str:

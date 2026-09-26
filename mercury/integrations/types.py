@@ -5,6 +5,18 @@ from datetime import datetime
 from typing import Protocol
 
 
+class ReauthorizationRequired(RuntimeError):
+    """The stored Google grant can no longer be used; the user must reconnect Gmail."""
+
+
+class ProviderUnavailable(RuntimeError):
+    """A transient provider failure (timeout, 429, 5xx) that may succeed on a bounded retry."""
+
+    def __init__(self, code: str = "provider_unavailable", *, retry_after: int | None = None):
+        super().__init__(code)
+        self.retry_after = retry_after
+
+
 @dataclass(frozen=True)
 class MailProfile:
     subject: str
@@ -42,6 +54,8 @@ class MailProvider(Protocol):
     def list_threads(self, *, limit: int, after_epoch: int) -> list[ProviderThread]: ...
 
     def get_thread(self, thread_id: str) -> ProviderThread: ...
+
+    def get_thread_metadata(self, thread_id: str) -> ProviderThread: ...
 
 
 @dataclass(frozen=True)

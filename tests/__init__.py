@@ -1,0 +1,1 @@
+"""Mercury test suite."""

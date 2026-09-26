@@ -5,6 +5,14 @@ on:
 permissions:
   contents: read
 jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   test:
     runs-on: ubuntu-latest
     services:
@@ -26,6 +34,7 @@ jobs:
       MAIL_MODE: fake
       AI_PROVIDER: fake
       SYNC_MODE: manual
+      DEBUG: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,4 +47,15 @@ jobs:
       - run: poetry run pytest --cov=mercury --cov-report=term-missing
       - run: poetry run bandit -q -r mercury
       - run: poetry run pip-audit
-
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f deploy/Dockerfile -t mercury-ci:${{ github.sha }} .
+      - uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: mercury-ci:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true

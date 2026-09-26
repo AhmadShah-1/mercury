@@ -164,6 +164,49 @@ def save_sender_rule(
     db.session.commit()
 
 
+def apply_sender_rule(
+    *, user_id: uuid.UUID, account_id: uuid.UUID, thread: EmailThread, sender: str
+) -> bool:
+    """Apply an exact-sender rule unless a user has manually locked the thread."""
+    try:
+        address = normalize_sender(sender)
+    except ValueError:
+        return False
+    rule = db.session.scalar(
+        select(SenderRule)
+        .where(
+            SenderRule.user_id == user_id,
+            SenderRule.gmail_account_id == account_id,
+            SenderRule.sender_address == address,
+            SenderRule.enabled.is_(True),
+        )
+        .order_by(SenderRule.priority, SenderRule.id)
+    )
+    if rule is None:
+        return False
+    assignment = db.session.scalar(
+        select(BucketAssignment).where(
+            BucketAssignment.thread_id == thread.id,
+            BucketAssignment.user_id == user_id,
+            BucketAssignment.gmail_account_id == account_id,
+        )
+    )
+    if assignment is not None and assignment.locked_by_user:
+        return False
+    if assignment is None:
+        assignment = BucketAssignment(
+            user_id=user_id,
+            gmail_account_id=account_id,
+            thread_id=thread.id,
+        )
+        db.session.add(assignment)
+    assignment.bucket_id = rule.bucket_id
+    assignment.origin = "rule"
+    assignment.score = None
+    assignment.version += 1
+    return True
+
+
 def seed_demo_buckets(account: GmailAccount) -> None:
     if db.session.scalar(
         select(func.count()).select_from(Bucket).where(Bucket.user_id == account.user_id)

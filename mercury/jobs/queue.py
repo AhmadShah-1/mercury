@@ -4,7 +4,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import procrastinate
 
-from mercury.jobs.tasks import tasks
+from mercury.jobs.tasks import build_blueprint
 
 
 def queue_dsn(sqlalchemy_url: str) -> str:
@@ -20,5 +20,5 @@ def create_queue_app(database_url: str, *, worker: bool = False) -> procrastinat
         else procrastinate.SyncPsycopgConnector(conninfo=dsn, min_size=1, max_size=2)
     )
     app = procrastinate.App(connector=connector)
-    app.add_tasks_from(tasks, namespace="mercury")
+    app.add_tasks_from(build_blueprint(), namespace="mercury")
     return app

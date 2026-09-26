@@ -1,40 +1,84 @@
+{%- from "components/brand.html" import wordmark, mark -%}
+{%- from "components/icons.html" import icon -%}
+{%- from "components/ui.html" import theme_toggle -%}
 <!doctype html>
-<html lang="en" hx-history="false">
+<html lang="en" hx-history="false" class="no-js">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <meta name="csrf-token" content="{{ csrf_token() }}">
-  <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"historyCacheSize":0,"selfRequestsOnly":true,"includeIndicatorStyles":false}'>
+  <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"historyCacheSize":0,"selfRequestsOnly":true,"includeIndicatorStyles":false,"timeout":20000}'>
   <title>{% block title %}Mercury{% endblock %}</title>
+  <meta name="description" content="{% block description %}Mercury turns a noisy Gmail account into a calm, organized workspace without replacing Gmail.{% endblock %}">
+  <link rel="icon" href="{{ url_for('static', filename='img/mercury-mark.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap.min.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/mercury.css') }}">
+  {#- Synchronous and tiny: applies the saved theme before first paint (no inline script under CSP). #}
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
   <script defer src="{{ url_for('static', filename='vendor/htmx.min.js') }}"></script>
-  <script defer src="{{ url_for('static', filename='vendor/bootstrap.bundle.min.js') }}"></script>
   <script defer src="{{ url_for('static', filename='js/mercury.js') }}"></script>
 </head>
-<body>
+<body class="{% block body_class %}page{% endblock %}">
   <a class="skip-link" href="#main">Skip to content</a>
+  {% block header %}
   <header class="topbar">
-    <a class="wordmark" href="{{ url_for('public.index') }}">Mercury</a>
-    <nav aria-label="Account">
-      {% if current_user.is_authenticated %}
-        <a href="{{ url_for('accounts.settings') }}">Settings</a>
-        <form class="inline-form" method="post" action="{{ url_for('accounts.logout') }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="link-button" type="submit">Log out</button>
-        </form>
-      {% else %}
-        <a href="{{ url_for('public.help_page') }}">Help</a>
-      {% endif %}
-    </nav>
+    <div class="topbar-inner">
+      {{ wordmark(url_for('inbox.workspace') if current_user.is_authenticated else url_for('public.index')) }}
+      <nav class="topnav" aria-label="Primary">
+        {% if current_user.is_authenticated %}
+          {% set ep = request.endpoint or "" %}
+          <a class="topnav-link" href="{{ url_for('inbox.workspace') }}"{% if ep.startswith('inbox.') or ep.startswith('buckets.') %} aria-current="page"{% endif %}>{{ icon("inbox") }}<span class="topnav-label">Workspace</span></a>
+          <a class="topnav-link" href="{{ url_for('accounts.settings') }}"{% if ep == 'accounts.settings' %} aria-current="page"{% endif %}>{{ icon("settings") }}<span class="topnav-label">Settings</span></a>
+          <a class="topnav-link" href="{{ url_for('public.help_page') }}"{% if ep == 'public.help_page' %} aria-current="page"{% endif %}>{{ icon("info") }}<span class="topnav-label">Help</span></a>
+          {{ theme_toggle() }}
+          <form class="inline-form" method="post" action="{{ url_for('accounts.logout') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="topnav-link link-button" type="submit">{{ icon("logout") }}<span class="topnav-label">Log out</span></button>
+          </form>
+        {% else %}
+          <a class="topnav-link hide-sm" href="{{ url_for('public.index') }}#how">How it works</a>
+          <a class="topnav-link hide-sm" href="{{ url_for('public.privacy') }}">Privacy</a>
+          <a class="topnav-link hide-sm" href="{{ url_for('public.help_page') }}">Help</a>
+          {{ theme_toggle() }}
+          {% if config.AUTH_MODE == 'dev' %}
+            <a class="btn btn-primary btn-sm" href="{{ url_for('accounts.dev_login') }}">Try the demo</a>
+          {% else %}
+            <form class="inline-form" method="post" action="{{ url_for('accounts.google_start') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-primary btn-sm" type="submit">Sign in</button>
+            </form>
+          {% endif %}
+        {% endif %}
+      </nav>
+    </div>
   </header>
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}<div class="flash-stack" aria-live="polite">
-      {% for category, message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}
-    </div>{% endif %}
-  {% endwith %}
-  <main id="main">{% block content %}{% endblock %}</main>
-  <footer><a href="{{ url_for('public.privacy') }}">Privacy</a> · <a href="{{ url_for('public.terms') }}">Terms</a></footer>
+  {% endblock %}
+  {% include "components/toasts.html" %}
+  <main id="main" tabindex="-1">{% block content %}{% endblock %}</main>
+  {% block footer %}
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <div class="footer-brand">{{ mark(22, "foot") }}<span>Mercury</span><span class="footer-note">A calm workspace for Gmail. Gmail stays authoritative.</span></div>
+      <nav aria-label="Legal and help">
+        <a href="{{ url_for('public.privacy') }}">Privacy</a>
+        <a href="{{ url_for('public.terms') }}">Terms</a>
+        <a href="{{ url_for('public.help_page') }}">Help</a>
+        {% if config.SUPPORT_EMAIL %}<a href="mailto:{{ config.SUPPORT_EMAIL }}">Support</a>{% endif %}
+      </nav>
+    </div>
+  </footer>
+  {% endblock %}
+  {% block dialogs %}{% endblock %}
+  <dialog class="dialog-m" id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <form method="dialog" class="dialog-inner">
+      <h2 class="dialog-title" id="confirm-title">Please confirm</h2>
+      <p class="dialog-text" id="confirm-message"></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" value="cancel" type="submit">Cancel</button>
+        <button class="btn btn-danger" value="confirm" type="submit" data-confirm-accept>Continue</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>
-

@@ -15,7 +15,7 @@ class ConfigError(ValueError):
     """A startup-safe configuration error that never contains a secret value."""
 
 
-DEV_SECRET = "mercury-local-fixtures-only-not-a-production-secret"  # noqa: S105
+DEV_SECRET = "mercury-local-fixtures-only-not-a-production-secret"  # noqa: S105  # nosec B105
 DEV_TOKEN_KEY = base64.urlsafe_b64encode(bytes(range(32))).decode()
 
 
@@ -125,6 +125,7 @@ def load_config(
         "AI_GLOBAL_MONTHLY_BUDGET_USD": money("AI_GLOBAL_MONTHLY_BUDGET_USD", "50"),
         "AI_ACCOUNT_MONTHLY_BUDGET_USD": money("AI_ACCOUNT_MONTHLY_BUDGET_USD", "3"),
         "AI_ACCOUNT_DAILY_THREAD_LIMIT": integer("AI_ACCOUNT_DAILY_THREAD_LIMIT", 100, 1, 1000),
+        "AI_ONBOARDING_THREAD_LIMIT": integer("AI_ONBOARDING_THREAD_LIMIT", 500, 1, 2000),
         "INDEX_MAX_THREADS": integer("INDEX_MAX_THREADS", 2000, 1, 5000),
         "INDEX_LOOKBACK_DAYS": integer("INDEX_LOOKBACK_DAYS", 180, 1, 365),
         "SUMMARY_LOOKBACK_DAYS": 30,
@@ -149,7 +150,8 @@ def load_config(
         "PERMANENT_SESSION_LIFETIME": timedelta(hours=8),
         "SESSION_REFRESH_EACH_REQUEST": False,
         "WTF_CSRF_ENABLED": True,
-        "WTF_CSRF_TIME_LIMIT": timedelta(hours=1),
+        # Flask-WTF passes this value directly to itsdangerous, which expects seconds.
+        "WTF_CSRF_TIME_LIMIT": 3600,
         "MAX_CONTENT_LENGTH": 256 * 1024,
         "MAX_FORM_MEMORY_SIZE": 64 * 1024,
         "MAX_FORM_PARTS": 100,
@@ -229,6 +231,11 @@ def validate_config(config: Mapping[str, Any]) -> None:
             "PUBSUB_PUSH_SERVICE_ACCOUNT",
             "PUBSUB_AUDIENCE",
         )
+        project_prefix = f"projects/{config['GOOGLE_PROJECT_ID']}/"
+        if not config["PUBSUB_TOPIC"].startswith(project_prefix + "topics/"):
+            raise ConfigError("PUBSUB_TOPIC must belong to GOOGLE_PROJECT_ID")
+        if not config["PUBSUB_SUBSCRIPTION"].startswith(project_prefix + "subscriptions/"):
+            raise ConfigError("PUBSUB_SUBSCRIPTION must belong to GOOGLE_PROJECT_ID")
     if env == "testing" and (config["MAIL_MODE"] != "fake" or config["AI_PROVIDER"] != "fake"):
         raise ConfigError("Default test mode forbids live Gmail and AI providers")
     if config["AUTH_MODE"] == "dev" and origin.hostname not in {"localhost", "127.0.0.1", "::1"}:

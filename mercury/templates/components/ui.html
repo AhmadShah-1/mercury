@@ -1,0 +1,65 @@
+{#- Reusable presentation macros. Every text argument is autoescaped by Jinja. -#}
+{% from "components/icons.html" import icon %}
+
+{#- Status badge: tone sets color, but text and icon always carry the meaning. -#}
+{% macro badge(text, tone="neutral", icon_name=None, title=None, sr_prefix=None) -%}
+<span class="badge-m badge-{{ tone }}"{% if title %} title="{{ title }}"{% endif %}>
+  {%- if icon_name %}{{ icon(icon_name, "icon-xs") }}{% endif -%}
+  {%- if sr_prefix %}<span class="visually-hidden">{{ sr_prefix }} </span>{% endif -%}
+  <span>{{ text }}</span></span>
+{%- endmacro %}
+
+{#- Callout / state block. Use `caller()` for body content and actions. -#}
+{% macro state(title, tone="info", icon_name="info", role=None, compact=False, id=None) -%}
+<div class="state state-{{ tone }}{% if compact %} state-compact{% endif %}"{% if role %} role="{{ role }}"{% endif %}{% if id %} id="{{ id }}"{% endif %}>
+  <span class="state-icon">{{ icon(icon_name) }}</span>
+  <div class="state-body">
+    <p class="state-title">{{ title }}</p>
+    {%- if caller %}{{ caller() }}{% endif %}
+  </div>
+</div>
+{%- endmacro %}
+
+{#- Empty state with the Mercury orbit motif. -#}
+{% macro empty(title, icon_name="inbox") -%}
+<div class="empty">
+  <div class="empty-art" aria-hidden="true"><span class="empty-orbit"></span>{{ icon(icon_name, "icon-lg") }}</div>
+  <h2 class="empty-title">{{ title }}</h2>
+  {%- if caller %}<div class="empty-body">{{ caller() }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{#- Count pill used in navigation. -#}
+{% macro count(n, label) -%}
+{%- if n is not none %}<span class="nav-count">{{ n }}<span class="visually-hidden"> {{ label }}</span></span>{% endif -%}
+{%- endmacro %}
+
+{#- Connection state as text + icon + tone. -#}
+{% macro connection_badge(state_value) -%}
+{%- if state_value == "connected" -%}{{ badge("Connected", "success", "check-circle", sr_prefix="Gmail:") }}
+{%- elif state_value == "reconnect_required" -%}{{ badge("Reconnect needed", "warning", "unplug", sr_prefix="Gmail:") }}
+{%- elif state_value == "deleting" -%}{{ badge("Disconnecting", "danger", "trash", sr_prefix="Gmail:") }}
+{%- else -%}{{ badge(state_value|replace("_", " ")|capitalize, "neutral", "info", sr_prefix="Gmail:") }}
+{%- endif -%}
+{%- endmacro %}
+
+{% macro action_label(action_type) -%}
+{{ {"reply": "Reply", "review": "Review", "pay": "Payment mentioned", "schedule": "Schedule", "read": "Read", "unknown": "Possible action", "none": "Possible action"}.get(action_type, "Possible action") }}
+{%- endmacro %}
+
+{% macro action_icon(action_type) -%}
+{{- {"reply": "reply", "review": "eye", "pay": "card", "schedule": "calendar", "read": "book"}.get(action_type, "flag") -}}
+{%- endmacro %}
+
+{#- Theme toggle: hidden until JS is available (the stored preference needs JS). -#}
+{% macro theme_toggle() -%}
+<button type="button" class="icon-btn theme-toggle js-only" data-theme-toggle aria-pressed="false" title="Toggle dark theme">
+  <span class="theme-icon-dark">{{ icon("moon") }}</span><span class="theme-icon-light">{{ icon("sun") }}</span>
+  <span class="visually-hidden">Dark theme</span>
+</button>
+{%- endmacro %}
+
+{#- Hidden CSRF input for hand-written forms (name precedes value on purpose). -#}
+{% macro csrf_input() -%}
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{%- endmacro %}
