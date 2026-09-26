@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.12.12-slim-bookworm AS builder
+ENV POETRY_VERSION=2.4.1 POETRY_VIRTUALENVS_IN_PROJECT=true POETRY_NO_INTERACTION=1
+WORKDIR /app
+RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
+COPY pyproject.toml poetry.lock* README.md ./
+RUN poetry install --only main --no-root --sync
+COPY mercury ./mercury
+COPY scripts ./scripts
+RUN poetry run python scripts/fetch_vendor_assets.py
+RUN poetry install --only main --sync
+
+FROM dopplerhq/cli:3 AS doppler
+
+FROM python:3.12.12-slim-bookworm AS runtime
+ENV PATH="/app/.venv/bin:${PATH}" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+RUN addgroup --system mercury && adduser --system --ingroup mercury --home /nonexistent mercury
+COPY --from=doppler /usr/local/bin/doppler /usr/local/bin/doppler
+COPY --from=builder /app/.venv /app/.venv
+COPY --chown=mercury:mercury mercury ./mercury
+COPY --chown=mercury:mercury migrations ./migrations
+COPY --chown=mercury:mercury deploy/entrypoint.sh deploy/gunicorn.conf.py ./deploy/
+COPY --chown=mercury:mercury wsgi.py pyproject.toml README.md ./
+USER mercury
+EXPOSE 8000
+ENTRYPOINT ["/app/deploy/entrypoint.sh"]
+CMD ["gunicorn", "--config", "deploy/gunicorn.conf.py", "wsgi:app"]
+

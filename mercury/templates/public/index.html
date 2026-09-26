@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Mercury — a calm Gmail workspace{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">Quiet organization for Gmail</p>
+  <h1>Find the messages that deserve your attention.</h1>
+  <p>Mercury organizes a bounded part of your mailbox, keeps Gmail authoritative, and opens original message text without turning your inbox into a chat interface.</p>
+  {% if current_user.is_authenticated %}
+    <a class="btn btn-primary" href="{{ url_for('inbox.workspace') }}">Open workspace</a>
+  {% elif config.AUTH_MODE == 'dev' %}
+    <a class="btn btn-primary" href="{{ url_for('accounts.dev_login') }}">Open synthetic demo</a>
+  {% else %}
+    <form method="post" action="{{ url_for('accounts.google_start') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-primary" type="submit">Sign in with Google</button>
+    </form>
+  {% endif %}
+</section>
+<section class="public-grid">
+  <article><h2>Read-only by design</h2><p>Mercury does not send, draft, delete, archive, or retrieve attachments.</p></article>
+  <article><h2>User choices stay put</h2><p>Manual bucket assignments and names are never silently replaced.</p></article>
+  <article><h2>Honest data handling</h2><p>Metadata and derived organization are retained while connected. Bodies are fetched when needed and are not stored in Mercury's database.</p></article>
+</section>
+{% endblock %}
+

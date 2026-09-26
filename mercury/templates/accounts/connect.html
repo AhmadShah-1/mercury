@@ -1,0 +1,6 @@
+{% extends "base.html" %}{% block title %}Connect Gmail — Mercury{% endblock %}
+{% block content %}<section class="card-form"><h1>Connect Gmail</h1>
+<p>Mercury reads a bounded recent window, retains selected metadata and derived organization, and fetches bodies when you open or analyze a thread. It does not send mail, retrieve attachments, or delete/archive messages.</p>
+<p>{% if config.AI_PROVIDER == 'fake' %}The synthetic AI stays offline and produces clearly marked fixture output.{% else %}When enabled, selected message text is sent to OpenAI for summaries and embeddings.{% endif %}</p>
+<form method="post" action="{{ url_for('accounts.gmail_start') }}">{{ form.hidden_tag() }}<div class="form-check">{{ form.accept_disclosure(class_='form-check-input') }} {{ form.accept_disclosure.label }}</div><div class="form-check">{{ form.ai_consent(class_='form-check-input') }} {{ form.ai_consent.label }}</div>{{ form.submit(class_='btn btn-primary') }}</form></section>{% endblock %}
+

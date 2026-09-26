@@ -1,0 +1,3 @@
+{% extends "base.html" %}{% block title %}Synthetic demo — Mercury{% endblock %}
+{% block content %}<section class="card-form"><h1>Synthetic demo</h1><p>This loopback-only profile uses invented messages and makes no cloud calls.</p><form method="post">{{ form.hidden_tag() }}{{ form.email.label }}{{ form.email(class_='form-control') }}{{ form.submit(class_='btn btn-primary') }}</form></section>{% endblock %}
+

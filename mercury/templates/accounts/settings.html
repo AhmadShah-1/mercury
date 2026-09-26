@@ -1,0 +1,6 @@
+{% extends "base.html" %}{% block title %}Settings — Mercury{% endblock %}
+{% block content %}<section class="document"><h1>Settings</h1>
+{% if current_user.gmail_account %}<dl><dt>Mailbox</dt><dd>{{ current_user.gmail_account.mailbox_address }}</dd><dt>Status</dt><dd>{{ current_user.gmail_account.connection_state }}</dd><dt>AI transfer</dt><dd>{{ 'Enabled' if current_user.gmail_account.ai_consent else 'Disabled' }}</dd></dl>
+<h2>Disconnect Gmail</h2><p>This stops processing and removes tokens, indexed metadata, summaries, embeddings, rules, and buckets. Gmail messages and labels remain.</p><form method="post" action="{{ url_for('accounts.disconnect') }}">{{ disconnect_form.hidden_tag() }}<button class="btn btn-outline-danger" type="submit">Disconnect and remove mailbox data</button></form>{% else %}<p>No Gmail account is connected.</p>{% endif %}
+<h2>Delete Mercury account</h2><form method="post" action="{{ url_for('accounts.delete_account') }}">{{ delete_form.hidden_tag() }}{{ delete_form.confirmation.label }}{{ delete_form.confirmation(class_='form-control') }}{{ delete_form.submit(class_='btn btn-danger') }}</form></section>{% endblock %}
+

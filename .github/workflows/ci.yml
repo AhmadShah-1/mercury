@@ -1,0 +1,41 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg17-bookworm
+        env:
+          POSTGRES_DB: mercury_test
+          POSTGRES_USER: mercury
+          POSTGRES_PASSWORD: mercury_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U mercury -d mercury_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      APP_ENV: testing
+      APP_BASE_URL: http://localhost:5000
+      DATABASE_URL: postgresql+psycopg://mercury:mercury_test@localhost:5432/mercury_test
+      AUTH_MODE: dev
+      MAIL_MODE: fake
+      AI_PROVIDER: fake
+      SYNC_MODE: manual
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pipx install poetry==2.4.1
+      - run: poetry install --sync
+      - run: poetry run flask --app wsgi:app db upgrade
+      - run: poetry run ruff check .
+      - run: poetry run ruff format --check .
+      - run: poetry run pytest --cov=mercury --cov-report=term-missing
+      - run: poetry run bandit -q -r mercury
+      - run: poetry run pip-audit
+
