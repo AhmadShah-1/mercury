@@ -1,0 +1,4 @@
+{#- One further page of the thread list, appended by the "Show older" item it replaces. -#}
+{% from "inbox/_thread_row.html" import thread_row with context %}
+{% for thread, analysis, assignment, bucket in rows %}{{ thread_row(thread, analysis, assignment, bucket, account) }}{% endfor %}
+{% if more_url %}{% include "inbox/_load_more.html" %}{% endif %}

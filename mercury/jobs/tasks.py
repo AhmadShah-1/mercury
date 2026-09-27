@@ -27,7 +27,7 @@ from flask import Flask
 from googleapiclient.errors import HttpError
 from procrastinate.exceptions import AlreadyEnqueued, ConnectorException
 from procrastinate.jobs import Status
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 
 from mercury.accounts.models import GmailAccount
 from mercury.buckets.organize import organize_account
@@ -249,6 +249,10 @@ def reconcile(app: Flask) -> dict[str, int]:
         )
     ).all()
     for run in running:
+        if _has_live_job(run):
+            # Large imports legitimately run past STALLED_RUN_AFTER. A job that is still queued
+            # or executing is alive; a dead worker's job is re-queued by retry_stalled_jobs.
+            continue
         if run.created_at < now - ABANDONED_RUN_AFTER:
             # Bounded recovery: an old run that never completed is reported, not retried forever.
             run.status = "failed"
@@ -293,6 +297,19 @@ def reconcile(app: Flask) -> dict[str, int]:
         if enqueue_sync(queue_app, account) is not None:
             counts["sync"] += 1
     return counts
+
+
+def _has_live_job(run: ProcessingRun) -> bool:
+    locks = [_discovery_lock(run.id), _sync_lock(run.gmail_account_id, run.id)]
+    return bool(
+        db.session.scalar(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM procrastinate_jobs"
+                " WHERE queueing_lock = ANY(:locks) AND status IN ('todo', 'doing'))"
+            ),
+            {"locks": locks},
+        )
+    )
 
 
 async def retry_stalled_jobs(context: procrastinate.JobContext, timestamp: int | None = None):
@@ -400,12 +417,20 @@ def _defer(queue_app, task_name: str, *, lock: str, queueing_lock: str, **kwargs
             return None
 
 
+def _discovery_lock(run_id) -> str:
+    return f"discover:{run_id}"
+
+
+def _sync_lock(account_id, run_id) -> str:
+    return f"sync:{account_id}:{run_id or 'catch-up'}"
+
+
 def enqueue_discovery(queue_app, account: GmailAccount, run: ProcessingRun) -> int | None:
     return _defer(
         queue_app,
         "mercury:discover_recent_threads",
         lock=f"account:{account.id}",
-        queueing_lock=f"discover:{run.id}",
+        queueing_lock=_discovery_lock(run.id),
         account_id=str(account.id),
         connection_generation=account.connection_generation,
         run_id=str(run.id),
@@ -417,7 +442,7 @@ def enqueue_sync(queue_app, account: GmailAccount, run: ProcessingRun | None = N
         queue_app,
         "mercury:sync_account_history",
         lock=f"account:{account.id}",
-        queueing_lock=f"sync:{account.id}:{run.id if run else 'catch-up'}",
+        queueing_lock=_sync_lock(account.id, run.id if run else None),
         account_id=str(account.id),
         connection_generation=account.connection_generation,
         run_id=str(run.id) if run else None,

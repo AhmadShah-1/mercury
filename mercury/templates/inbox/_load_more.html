@@ -1,0 +1,5 @@
+{#- Replaces itself with the next page of rows; without JavaScript it links to that page. -#}
+{% from "components/icons.html" import icon %}
+<li class="load-more" data-load-more>
+  <a class="btn btn-quiet btn-sm" href="{{ more_url }}" hx-get="{{ more_url }}" hx-target="closest li" hx-swap="outerHTML" data-busy-label="Loading…">{{ icon("chevron-down", "icon-sm") }} Show older conversations</a>
+</li>

@@ -5,8 +5,12 @@
 {% set failed = run.status == "failed" or run.safe_error_code %}
 {% set done = run.status == "succeeded" %}
 {% set indexing = run.stage in ["indexing", "synchronizing"] %}
+{#- A full import only knows Gmail's rough estimate until it finishes; syncs count exactly. -#}
+{% set estimating = run.stage == "indexing" %}
+{% set past_estimate = estimating and run.completed_count >= run.found_count %}
 {% set organizing = run.stage in ["analyzing", "discovering_buckets"] %}
-{% set indexed = organizing or done %}
+{#- A run that failed after indexing every conversation still finished that step. -#}
+{% set indexed = organizing or done or (failed and run.found_count and run.completed_count >= run.found_count and not estimating) %}
 {% set found_step = "done" if (indexing or indexed or run.found_count) else ("failed" if failed else "active") %}
 {% set index_step = "done" if indexed else ("failed" if failed and found_step == "done" else ("active" if indexing else "todo")) %}
 {% set prepare_step = "done" if done else ("failed" if failed and index_step == "done" else ("active" if organizing else "todo")) %}
@@ -16,7 +20,7 @@
     <li class="step step-{{ found_step }}">
       <span class="step-dot">{% if found_step == "done" %}{{ icon("check", "icon-sm") }}{% elif found_step == "failed" %}{{ icon("x", "icon-sm") }}{% else %}<span class="step-pulse"></span>{% endif %}</span>
       <div class="step-body">
-        <p class="step-title">{% if found_step == "done" %}Found {{ run.found_count }} {{ "conversation" if run.found_count == 1 else "conversations" }}{% else %}Finding conversations{% endif %}</p>
+        <p class="step-title">{% if estimating %}Finding conversations{% elif found_step == "done" %}Found {{ run.found_count }} {{ "conversation" if run.found_count == 1 else "conversations" }}{% else %}Finding conversations{% endif %}</p>
         <p class="step-sub">{% if run.stage == "recovered_after_stall" %}Resumed after an interruption. {% endif %}Up to {{ "{:,}".format(run.requested_limit) }} recently active conversations from the last {{ config.INDEX_LOOKBACK_DAYS }} days.</p>
       </div>
       <span class="visually-hidden">{{ {"done": "Complete", "active": "In progress", "failed": "Stopped", "todo": "Not started"}[found_step] }}</span>
@@ -25,9 +29,12 @@
       <span class="step-dot">{% if index_step == "done" %}{{ icon("check", "icon-sm") }}{% elif index_step == "failed" %}{{ icon("x", "icon-sm") }}{% elif index_step == "active" %}<span class="step-pulse"></span>{% endif %}</span>
       <div class="step-body">
         <p class="step-title">Indexed {{ run.completed_count }} {{ "conversation" if run.completed_count == 1 else "conversations" }}</p>
-        {% if run.found_count %}
+        {% if past_estimate %}
+        <progress class="meter" aria-label="Conversations indexed">{{ run.completed_count }} indexed so far</progress>
+        <p class="step-sub">{{ run.completed_count }} so far · more than Gmail's estimate; the total settles when indexing finishes</p>
+        {% elif run.found_count %}
         <progress class="meter" value="{{ run.completed_count }}" max="{{ run.found_count }}" aria-label="Conversations indexed">{{ run.completed_count }} of {{ run.found_count }}</progress>
-        <p class="step-sub">{{ run.completed_count }} of {{ run.found_count }} found{% if run.stage == "synchronizing" %} · checking for changes{% endif %}</p>
+        <p class="step-sub">{{ run.completed_count }} of {% if estimating %}about {{ run.found_count }} (Gmail's estimate){% else %}{{ run.found_count }} found{% endif %}{% if run.stage == "synchronizing" %} · checking for changes{% endif %}</p>
         {% else %}
         <p class="step-sub">Metadata only: senders, subjects, dates, and labels.</p>
         {% endif %}

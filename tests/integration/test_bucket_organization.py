@@ -202,3 +202,27 @@ def test_bucket_scores_command_reports_numbers_only(app, account):
     assert "Job Opportunities" in result.output
     assert "would_place=1" in result.output
     assert "Confidential" not in result.output
+
+
+def test_an_unusable_bucket_name_skips_that_bucket_without_failing_the_pass(account, monkeypatch):
+    from mercury.integrations.ai.fake import FakeAIProvider
+    from mercury.integrations.types import InvalidProviderOutput
+
+    def refuse(self, *, descriptions):
+        raise InvalidProviderOutput("invalid_structured_output")
+
+    monkeypatch.setattr(FakeAIProvider, "suggest_bucket", refuse)
+    stale = make_bucket(account, "Job Opportunities", meaning_stale=True)
+    _populate(account, stale, JOBS, 5, seed=22)
+    new_mail = add_thread(account, near(JOBS, np.random.default_rng(23)))
+
+    counts = organize_account(account)
+
+    assert counts["placed"] == 1 and counts["renamed"] == 0
+    assert bucket_of(new_mail) == stale.id
+    stale = db.session.get(Bucket, stale.id)
+    assert (stale.name, stale.meaning_stale, stale.named_member_count) == (
+        "Job Opportunities",
+        False,
+        6,
+    )

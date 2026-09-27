@@ -298,7 +298,11 @@
       if (reader && !target.hasAttribute("data-reader-standalone")) markCurrent(`thread-${reader.dataset.threadId}`);
     }
   });
-  doc.addEventListener("htmx:afterSettle", () => syncSelection());
+  doc.addEventListener("htmx:afterSettle", (event) => {
+    // A newly appended page of rows joins the active filter and the shown count.
+    if (event.detail.target?.closest?.("[data-thread-list]")) applyFilter();
+    syncSelection();
+  });
 
   /* ---------------------------------------------- workspace: selection */
   const selected = new Set();

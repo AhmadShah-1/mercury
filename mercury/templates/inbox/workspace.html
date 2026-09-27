@@ -136,7 +136,7 @@
         <button type="button" class="btn btn-ghost btn-sm" data-bulk-clear>Clear</button>
       </div>
       {% endif %}
-      <p class="list-count"><span data-list-count>{{ rows|length }}</span> {{ "conversation" if rows|length == 1 else "conversations" }} shown{% if rows|length >= 100 %} · most recent 100{% endif %}</p>
+      <p class="list-count"><span data-list-count>{{ rows|length }}</span> {{ "conversation" if rows|length == 1 else "conversations" }} shown{% if paged %} · older conversations{% elif more_url %} · newest first{% endif %}</p>
     </header>
 
     <div class="list-states">
@@ -181,9 +181,10 @@
     {% if rows %}
     <ol class="thread-list" role="list" data-thread-list aria-labelledby="list-title">
       {% for thread, analysis, assignment, bucket in rows %}{{ thread_row(thread, analysis, assignment, bucket, account) }}{% endfor %}
+      {% if more_url %}{% include "inbox/_load_more.html" %}{% endif %}
     </ol>
     <div class="filter-empty" data-filter-empty hidden>
-      {% call empty("No conversations match that filter", "search") %}<p>The filter only searches conversations already shown on this page.</p>{% endcall %}
+      {% call empty("No conversations match that filter", "search") %}<p>The filter only searches conversations already loaded. Use “Show older conversations” to load more.</p>{% endcall %}
     </div>
     {% else %}
       {% if selected_bucket %}

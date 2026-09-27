@@ -28,7 +28,7 @@ from mercury.buckets.clustering import (
 from mercury.buckets.models import Bucket
 from mercury.buckets.service import unique_bucket_name
 from mercury.extensions import db
-from mercury.integrations.types import BucketSuggestion
+from mercury.integrations.types import BucketSuggestion, InvalidProviderOutput
 from mercury.intelligence.budget import (
     BudgetExceeded,
     cancel_reservation,
@@ -197,6 +197,8 @@ def discover_suggested_buckets(
             suggestion = _suggest_meaning(account, [member for member, _ in kept])
         except BudgetExceeded:
             break
+        except InvalidProviderOutput:
+            continue  # An unusable name skips this group; it is tried again as mail arrives.
         if not _still_current(account, generation):
             return created
         bucket = _new_bucket(account, suggestion, member_count=len(kept))
@@ -260,6 +262,8 @@ def split_buckets(
             except BudgetExceeded:
                 db.session.commit()
                 return created
+            except InvalidProviderOutput:
+                continue
             if not _still_current(account, generation):
                 return created
             child = _new_bucket(account, suggestion, member_count=len(kept), split_from=bucket.id)
@@ -308,6 +312,13 @@ def refresh_meanings(
             suggestion = _suggest_meaning(account, members)
         except BudgetExceeded:
             break
+        except InvalidProviderOutput:
+            # Keep the current meaning and wait for further growth instead of paying for the
+            # same failing call on every pass.
+            bucket.named_member_count = len(members)
+            bucket.meaning_stale = False
+            db.session.commit()
+            continue
         if not _still_current(account, generation):
             return renamed
         ai_name, ai_purpose = _clean(suggestion.name, 80), _clean(suggestion.purpose, 240)

@@ -3,13 +3,14 @@ from __future__ import annotations
 import math
 
 from flask import current_app
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select, update
 
 from mercury.accounts.models import GmailAccount
 from mercury.extensions import db
 from mercury.inbox.models import EmailThread, ThreadAnalysis, ThreadEmbedding
 from mercury.inbox.reader import build_thread_view
 from mercury.inbox.service import mail_provider_for
+from mercury.integrations.types import InvalidProviderOutput
 from mercury.intelligence.budget import (
     BudgetExceeded,
     cancel_reservation,
@@ -71,7 +72,7 @@ def analyze_thread(thread: EmailThread, *, onboarding: bool = False) -> None:
         raise
     if len(vector) != 512 or not all(math.isfinite(value) for value in vector):
         cancel_reservation(usage.id)
-        raise ValueError("invalid_embedding")
+        raise InvalidProviderOutput("invalid_embedding")
     db.session.expire_all()
     account = db.session.get(GmailAccount, thread.gmail_account_id)
     current_thread = db.session.get(EmailThread, thread.id)
@@ -137,15 +138,57 @@ def analyze_thread(thread: EmailThread, *, onboarding: bool = False) -> None:
     )
 
 
+# Threads loaded per query; the whole pending set is still worked through in one call.
+ANALYSIS_BATCH_SIZE = 100
+
+
 def analyze_pending(user_id, *, onboarding: bool = False) -> None:
-    threads = db.session.scalars(
-        select(EmailThread)
-        .where(
-            EmailThread.user_id == user_id,
-            EmailThread.processing_state.in_(("pending", "budget_paused")),
+    """Analyze pending threads newest first, in bounded batches, until none remain.
+
+    Each thread is visited at most once per call (keyset order), so threads skipped for a stale
+    connection are not retried in a loop. The first budget pause ends the call: later threads
+    would pause too, and all of them resume on the next run.
+    """
+    cursor = None
+    while True:
+        query = (
+            select(EmailThread)
+            .where(
+                EmailThread.user_id == user_id,
+                EmailThread.processing_state.in_(("pending", "budget_paused")),
+            )
+            .order_by(EmailThread.latest_message_at.desc(), EmailThread.id)
+            .limit(ANALYSIS_BATCH_SIZE)
         )
-        .order_by(EmailThread.latest_message_at.desc())
-        .limit(100)
-    ).all()
-    for thread in threads:
-        analyze_thread(thread, onboarding=onboarding)
+        if cursor is not None:
+            latest, thread_id = cursor
+            query = query.where(
+                or_(
+                    EmailThread.latest_message_at < latest,
+                    and_(EmailThread.latest_message_at == latest, EmailThread.id > thread_id),
+                )
+            )
+        threads = db.session.scalars(query).all()
+        if not threads:
+            return
+        for thread in threads:
+            cursor = (thread.latest_message_at, thread.id)
+            try:
+                analyze_thread(thread, onboarding=onboarding)
+            except (InvalidProviderOutput, LookupError) as exc:
+                # One unusable AI reply, or a thread deleted in Gmail since indexing, skips that
+                # thread only. It is not retried every run; a new message resets it to pending.
+                db.session.rollback()
+                db.session.execute(
+                    update(EmailThread)
+                    .where(EmailThread.id == cursor[1], EmailThread.user_id == user_id)
+                    .values(processing_state="analysis_failed")
+                )
+                db.session.commit()
+                current_app.logger.warning(
+                    "analysis_skipped",
+                    extra={"event_type": "analysis_skipped", "code": str(exc)},
+                )
+                continue
+            if thread.processing_state == "budget_paused":
+                return

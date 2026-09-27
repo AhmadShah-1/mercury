@@ -16,7 +16,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from mercury.accounts.models import GmailAccount
 from mercury.extensions import db
@@ -61,8 +61,20 @@ def _error_reasons(error: HttpError) -> set[str]:
 class GmailProvider:
     def __init__(self, account: GmailAccount):
         self.account = account
+        if not account.encrypted_token_bundle:
+            # Nothing stored can ever authenticate (for example a synthetic-mailbox account in a
+            # Gmail-mode database), so ask for reconnection instead of failing every sync. A
+            # bundle that exists but will not decrypt stays an operator error and leaves the
+            # account untouched, so restoring the encryption key recovers it.
+            db.session.execute(
+                update(GmailAccount)
+                .where(GmailAccount.id == account.id, GmailAccount.connection_state == "connected")
+                .values(connection_state="reconnect_required")
+            )
+            db.session.commit()
+            raise ReauthorizationRequired("connection_needs_reauthorization")
         cipher = current_app.extensions["mercury"]["token_cipher"]
-        bundle = cipher.decrypt(account.encrypted_token_bundle or "")
+        bundle = cipher.decrypt(account.encrypted_token_bundle)
         self.credentials = self._credentials_from_bundle(bundle, account.granted_scopes)
         self.service = self._build_service(self.credentials)
         self._discovery_quota_ready_at = time.monotonic()

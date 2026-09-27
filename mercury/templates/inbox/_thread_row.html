@@ -1,12 +1,13 @@
 {% from "components/icons.html" import icon %}
 {% from "components/ui.html" import badge, action_label, action_icon %}
 
-{#- AI state for one thread: ready | stale | pending | paused | disabled -#}
+{#- AI state for one thread: ready | stale | pending | paused | failed | disabled -#}
 {% macro ai_state(thread, analysis, account) -%}
 {%- if analysis and analysis.stale -%}stale
 {%- elif analysis -%}ready
 {%- elif not account or not account.ai_consent or not config.AI_PROCESSING_ENABLED -%}disabled
 {%- elif thread.processing_state == "budget_paused" -%}paused
+{%- elif thread.processing_state == "analysis_failed" -%}failed
 {%- else -%}pending
 {%- endif -%}
 {%- endmacro %}
@@ -34,6 +35,8 @@
         <span class="ai-tag" title="AI summary">AI<span class="visually-hidden"> summary:</span></span> {{ analysis.summary }}
       {%- elif state == "paused" -%}
         <span class="row-pending">{{ icon("pause", "icon-xs") }} Summary paused: AI budget reached.</span> {{ thread.snippet }}
+      {%- elif state == "failed" -%}
+        <span class="row-pending">{{ icon("info", "icon-xs") }} Summary unavailable for this conversation.</span> {{ thread.snippet }}
       {%- elif state == "disabled" -%}
         <span class="row-snippet"><span class="visually-hidden">Gmail preview: </span>{{ thread.snippet or "No preview available." }}</span>
       {%- else -%}

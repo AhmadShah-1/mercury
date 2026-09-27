@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from flask import (
     Blueprint,
@@ -45,7 +45,8 @@ WORKSPACE_VIEWS = {
 }
 SAFE_PROVIDER_CODES = {"provider_unavailable", "provider_rate_limited", "provider_timeout"}
 # A run that has not finished after this long stops live polling and asks for a manual refresh.
-PROGRESS_POLL_WINDOW_SECONDS = 30 * 60
+# Matches the worker's abandoned-run bound, since a full 2,000-thread import can take an hour.
+PROGRESS_POLL_WINDOW_SECONDS = 2 * 60 * 60
 
 
 def _is_htmx() -> bool:
@@ -74,7 +75,35 @@ def longdate(value: datetime | None) -> str:
     return f"{moment:%a} {moment:%b} {moment.day}, {moment.year} · {moment:%H:%M} UTC"
 
 
-def _workspace_query(bucket_id: uuid.UUID | None = None, view: str = "overview"):
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _cursor_for(thread: EmailThread) -> str:
+    moment = thread.latest_message_at
+    moment = moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+    # Integer microseconds round-trip exactly, which the keyset equality comparison needs.
+    return f"{(moment - _EPOCH) // timedelta(microseconds=1)}_{thread.id}"
+
+
+def _parse_cursor(value: str | None) -> tuple[datetime, uuid.UUID] | None:
+    if not value:
+        return None
+    try:
+        micros, thread_id = value.split("_", 1)
+        return _EPOCH + timedelta(microseconds=int(micros)), uuid.UUID(thread_id)
+    except (OverflowError, ValueError):
+        return None
+
+
+def _workspace_query(
+    bucket_id: uuid.UUID | None = None,
+    view: str = "overview",
+    cursor: tuple[datetime, uuid.UUID] | None = None,
+):
+    """One page (plus one row to detect more) in newest-first keyset order.
+
+    Pages are ``INBOX_PAGE_SIZE`` long; older ones load by cursor, never as one mailbox list.
+    """
     query = (
         select(EmailThread, ThreadAnalysis, BucketAssignment, Bucket)
         # Every joined row is owner-filtered too, in addition to the composite tenant FKs.
@@ -98,8 +127,16 @@ def _workspace_query(bucket_id: uuid.UUID | None = None, view: str = "overview")
         )
         .where(EmailThread.user_id == current_user.id)
         .order_by(EmailThread.latest_message_at.desc(), EmailThread.id)
-        .limit(100)
+        .limit(current_app.config["INBOX_PAGE_SIZE"] + 1)
     )
+    if cursor is not None:
+        latest, thread_id = cursor
+        query = query.where(
+            or_(
+                EmailThread.latest_message_at < latest,
+                and_(EmailThread.latest_message_at == latest, EmailThread.id > thread_id),
+            )
+        )
     if bucket_id:
         query = query.where(Bucket.id == bucket_id, Bucket.user_id == current_user.id)
     elif view == "attention":
@@ -164,11 +201,29 @@ def _split_parent(bucket: Bucket | None) -> Bucket | None:
     )
 
 
-def _render_workspace(*, rows, selected_bucket=None, view: str = "overview"):
+def _render_workspace(*, rows, selected_bucket=None, view: str = "overview", paged=False):
+    page_size = current_app.config["INBOX_PAGE_SIZE"]
+    rows, more = rows[:page_size], len(rows) > page_size
+    more_url = None
+    if more:
+        args = dict(request.view_args or {})
+        if selected_bucket is None and view != "overview":
+            args["view"] = view
+        more_url = url_for(request.endpoint, before=_cursor_for(rows[-1][0]), **args)
+    if paged and _is_htmx():
+        # "Show older" appends the next page in place of its own list item.
+        return render_template(
+            "inbox/_thread_page.html",
+            rows=rows,
+            more_url=more_url,
+            account=current_user.gmail_account,
+        )
     buckets = active_buckets(current_user.id)
     return render_template(
         "inbox/workspace.html",
         rows=rows,
+        more_url=more_url,
+        paged=paged,
         buckets=buckets,
         selected_bucket=selected_bucket,
         view=view,
@@ -189,7 +244,10 @@ def workspace():
     view = request.args.get("view", "overview")
     if view not in WORKSPACE_VIEWS:
         view = "overview"
-    return _render_workspace(rows=_workspace_query(view=view), view=view)
+    cursor = _parse_cursor(request.args.get("before"))
+    return _render_workspace(
+        rows=_workspace_query(view=view, cursor=cursor), view=view, paged=cursor is not None
+    )
 
 
 @bp.get("/app/buckets/<uuid:bucket_id>")
@@ -200,7 +258,12 @@ def bucket_workspace(bucket_id):
     )
     if bucket is None:
         abort(404)
-    return _render_workspace(rows=_workspace_query(bucket_id), selected_bucket=bucket)
+    cursor = _parse_cursor(request.args.get("before"))
+    return _render_workspace(
+        rows=_workspace_query(bucket_id, cursor=cursor),
+        selected_bucket=bucket,
+        paged=cursor is not None,
+    )
 
 
 @bp.get("/app/threads/<uuid:thread_id>")

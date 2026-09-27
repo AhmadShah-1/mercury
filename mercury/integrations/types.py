@@ -10,6 +10,14 @@ class ReauthorizationRequired(RuntimeError):
     """The stored Google grant can no longer be used; the user must reconnect Gmail."""
 
 
+class InvalidProviderOutput(ValueError):
+    """An AI reply for one item was unusable (refusal, empty, or off-schema); not retried.
+
+    Callers skip that one item instead of failing the whole run, so a single odd reply cannot
+    block every later thread behind it.
+    """
+
+
 class ProviderUnavailable(RuntimeError):
     """A transient provider failure (timeout, 429, 5xx) that may succeed on a bounded retry."""
 

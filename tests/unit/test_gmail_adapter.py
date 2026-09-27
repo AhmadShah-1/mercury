@@ -232,3 +232,27 @@ def test_discovery_stops_at_limit_without_requesting_a_zero_sized_page():
     assert len(list(discovery.threads)) == 1
     assert len(list_calls) == 1
     assert list_calls[0]["maxResults"] == 1
+
+
+def test_account_without_stored_credentials_asks_for_reconnection(app, connected):
+    # The synthetic mailbox has no token bundle; in Gmail mode it must stop being scheduled.
+    with app.app_context():
+        account = db.session.scalar(select(GmailAccount))
+        assert not account.encrypted_token_bundle
+        with pytest.raises(ReauthorizationRequired):
+            GmailProvider(account)
+        db.session.refresh(account)
+        assert account.connection_state == "reconnect_required"
+
+
+def test_undecryptable_credentials_fail_closed_without_forcing_reconnection(app, connected):
+    from mercury.security.crypto import TokenDecryptionError
+
+    with app.app_context():
+        account = db.session.scalar(select(GmailAccount))
+        account.encrypted_token_bundle = "written-with-a-different-key"
+        db.session.commit()
+        with pytest.raises(TokenDecryptionError):
+            GmailProvider(account)
+        db.session.refresh(account)
+        assert account.connection_state == "connected"

@@ -133,8 +133,10 @@ def load_config(
         "AI_EMBEDDING_INPUT_USD_PER_MILLION": money("AI_EMBEDDING_INPUT_USD_PER_MILLION"),
         "AI_GLOBAL_MONTHLY_BUDGET_USD": money("AI_GLOBAL_MONTHLY_BUDGET_USD", "50"),
         "AI_ACCOUNT_MONTHLY_BUDGET_USD": money("AI_ACCOUNT_MONTHLY_BUDGET_USD", "3"),
-        "AI_ACCOUNT_DAILY_THREAD_LIMIT": integer("AI_ACCOUNT_DAILY_THREAD_LIMIT", 100, 1, 1000),
-        "AI_ONBOARDING_THREAD_LIMIT": integer("AI_ONBOARDING_THREAD_LIMIT", 500, 1, 2000),
+        # Thread-count caps may reach INDEX_MAX_THREADS' ceiling so any indexed window can be
+        # analyzed; the monthly USD budgets above remain the hard spending limit.
+        "AI_ACCOUNT_DAILY_THREAD_LIMIT": integer("AI_ACCOUNT_DAILY_THREAD_LIMIT", 100, 1, 5000),
+        "AI_ONBOARDING_THREAD_LIMIT": integer("AI_ONBOARDING_THREAD_LIMIT", 500, 1, 5000),
         "MAX_SUGGESTED_BUCKETS": integer("MAX_SUGGESTED_BUCKETS", 12, 1, 24),
         "MAX_ACTIVE_BUCKETS": integer("MAX_ACTIVE_BUCKETS", 30, 1, 100),
         # Cosine thresholds on the mean of a thread's nearest bucket members, measured on one
@@ -148,6 +150,8 @@ def load_config(
         "BUCKET_SPLIT_MAX_SIMILARITY": similarity("BUCKET_SPLIT_MAX_SIMILARITY", 0.75),
         "INDEX_MAX_THREADS": integer("INDEX_MAX_THREADS", 2000, 1, 5000),
         "INDEX_LOOKBACK_DAYS": integer("INDEX_LOOKBACK_DAYS", 180, 1, 365),
+        # Conversations per workspace list page; older ones load on request, never all at once.
+        "INBOX_PAGE_SIZE": integer("INBOX_PAGE_SIZE", 100, 25, 500),
         "SUMMARY_LOOKBACK_DAYS": 30,
         "SUMMARY_MAX_INPUT_TOKENS": 3000,
         "SUMMARY_MAX_OUTPUT_TOKENS": 220,

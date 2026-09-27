@@ -3,8 +3,11 @@ from __future__ import annotations
 import base64
 from types import SimpleNamespace
 
+import pytest
+
 from mercury.integrations.ai.openai import OpenAIProvider
 from mercury.integrations.google.gmail import GmailProvider
+from mercury.integrations.types import InvalidProviderOutput
 from mercury.intelligence.schemas import BucketSuggestionOutput, SummaryOutput
 
 
@@ -120,3 +123,55 @@ def test_gmail_mime_parser_prefers_plain_text_and_skips_attachment_parts(app):
     assert body == "safe plain text"
     assert mime == "text/plain"
     assert attachment is True
+
+
+def _provider_replying(reply) -> OpenAIProvider:
+    """An adapter whose structured call returns ``reply()`` (or raises what it raises)."""
+    provider = OpenAIProvider(
+        api_key="fixture-key",
+        summary_model="gpt-4.1-mini-2025-04-14",
+        embedding_model="text-embedding-3-small",
+        dimensions=512,
+        timeout=5,
+    )
+    provider.client = SimpleNamespace(responses=SimpleNamespace(parse=lambda **_kwargs: reply()))
+    return provider
+
+
+def _summary_reply(source_message_id: str | None):
+    return SimpleNamespace(
+        output_parsed=SummaryOutput(
+            summary="A bounded result.",
+            action_required=True,
+            action_type="reply",
+            action_text="Reply to the sender.",
+            source_message_id=source_message_id,
+            uncertain=False,
+        ),
+        usage=SimpleNamespace(input_tokens=12, output_tokens=4),
+    )
+
+
+def test_citation_outside_the_thread_is_dropped_and_marked_uncertain():
+    provider = _provider_replying(lambda: _summary_reply("message-from-quoted-text"))
+
+    result = provider.summarize(text="Invented message", message_ids=("message-1",))
+
+    assert result.summary == "A bounded result."
+    assert (result.source_message_id, result.uncertain) == (None, True)
+
+
+def test_unusable_replies_raise_invalid_output_instead_of_a_generic_error():
+    def off_schema():
+        SummaryOutput.model_validate({"summary": "x" * 800})  # raises pydantic ValidationError
+
+    def bad_name():
+        BucketSuggestionOutput.model_validate({"name": "One", "purpose": "Too short a name."})
+
+    refusal = SimpleNamespace(output_parsed=None, usage=None)
+    for reply in (lambda: refusal, off_schema):
+        with pytest.raises(InvalidProviderOutput):
+            _provider_replying(reply).summarize(text="Invented", message_ids=("message-1",))
+    for reply in (lambda: refusal, bad_name):
+        with pytest.raises(InvalidProviderOutput):
+            _provider_replying(reply).suggest_bucket(descriptions=("Subject: invented",))
