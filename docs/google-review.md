@@ -8,7 +8,7 @@ Mercury organizes one Gmail account belonging to the signed-in Google subject. S
 
 ## Data flow and processors
 
-Document the browser, Flask web role, worker, PostgreSQL/pgvector, Gmail API, OpenAI API, Doppler, and Azure boundaries using `docs/architecture.md`. Record exact Azure resources, regions, production model/project settings, and subprocessors before review.
+Document the browser, Flask web role, worker, PostgreSQL/pgvector, Gmail API, the AI endpoint (OpenAI API or Azure OpenAI, and its deployment type/data zone), Doppler, and Azure boundaries using `docs/architecture.md`. Record exact Azure resources, regions, production model/project settings, and subprocessors before review.
 
 ## Evidence to capture
 

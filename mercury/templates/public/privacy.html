@@ -20,7 +20,7 @@
     <p>Email text you open in Mercury is shown as escaped plain text. Remote images aren't loaded, and email content isn't written to your browser's storage. A theme preference is the only thing Mercury saves in your browser.</p>
 
     <h2 id="ai">AI processing</h2>
-    <p>When AI processing is enabled and you allowed it, bounded selected text is sent to the configured OpenAI API project for summaries and embeddings. Requests are stateless with response storage disabled, and the model has no tools or browsing. API retention and abuse-monitoring rules still apply; Mercury does not claim zero retention by every processor.</p>
+    <p>When AI processing is enabled and you allowed it, bounded selected text is sent to {{ config.AI_PROCESSOR_NAME }} for summaries and embeddings. Requests are stateless with response storage disabled, and the model has no tools or browsing. API retention and abuse-monitoring rules still apply; Mercury does not claim zero retention by every processor.</p>
     <p>If you declined AI transfer, no message text is sent to an embedding or summary endpoint.</p>
 
     <h2 id="retention">Retention</h2>

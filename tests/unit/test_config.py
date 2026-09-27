@@ -57,3 +57,35 @@ def test_dev_login_requires_loopback_origin():
                 "AUTH_MODE": "dev",
             }
         )
+
+
+def test_azure_openai_endpoint_is_accepted_and_named_on_consent_pages():
+    environment = _production_env()
+    environment["OPENAI_BASE_URL"] = "https://mercury-openai.openai.azure.com/openai/v1/"
+    config = load_config(environ=environment)
+    assert config["OPENAI_BASE_URL"] == "https://mercury-openai.openai.azure.com/openai/v1"
+    assert config["AI_PROCESSOR_NAME"] == "Azure OpenAI (Microsoft)"
+
+
+def test_blank_openai_endpoint_uses_the_openai_api():
+    environment = _production_env()
+    environment["OPENAI_BASE_URL"] = ""
+    config = load_config(environ=environment)
+    assert config["OPENAI_BASE_URL"] == "https://api.openai.com/v1"
+    assert config["AI_PROCESSOR_NAME"] == "OpenAI"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://mercury-openai.openai.azure.com/openai/v1",
+        "https://collector.example/openai/v1",
+        "https://evilopenai.azure.com/openai/v1",
+        "https://user:pass@mercury-openai.openai.azure.com/openai/v1",
+    ],
+)
+def test_openai_endpoint_rejects_unapproved_destinations(url):
+    environment = _production_env()
+    environment["OPENAI_BASE_URL"] = url
+    with pytest.raises(ConfigError, match="OPENAI_BASE_URL"):
+        load_config(environ=environment)

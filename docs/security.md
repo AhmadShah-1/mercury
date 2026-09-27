@@ -8,5 +8,5 @@
 - Logs may contain event types, request IDs, internal IDs, counts, latency, status class, and retry number. They must not contain subjects, bodies, snippets, prompts, summaries, cookies, tokens, authorization codes, or raw provider payloads.
 - The Gmail production adapter exposes no send, draft, delete, trash, attachment-download, or settings methods.
 
-Security tests are evidence, not a certification. Review Google Workspace policy and OpenAI data controls for the actual production account before public use.
+Security tests are evidence, not a certification. Review Google Workspace policy and the AI processor's data controls (OpenAI, or Azure OpenAI's abuse-monitoring retention and deployment data zone) for the actual production account before public use.
 

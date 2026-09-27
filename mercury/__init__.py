@@ -55,6 +55,7 @@ def create_app(config_overrides=None) -> Flask:
         if app.config["AI_PROVIDER"] == "fake"
         else OpenAIProvider(
             api_key=app.config["OPENAI_API_KEY"],
+            base_url=app.config["OPENAI_BASE_URL"],
             summary_model=app.config["SUMMARY_MODEL"],
             embedding_model=app.config["EMBEDDING_MODEL"],
             dimensions=app.config["EMBEDDING_DIMENSIONS"],

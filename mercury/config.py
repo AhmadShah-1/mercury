@@ -17,6 +17,19 @@ class ConfigError(ValueError):
 
 DEV_SECRET = "mercury-local-fixtures-only-not-a-production-secret"  # noqa: S105  # nosec B105
 DEV_TOKEN_KEY = base64.urlsafe_b64encode(bytes(range(32))).decode()
+OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+# Email text may only go to the OpenAI API or an Azure OpenAI / Foundry resource's v1 endpoint.
+AZURE_OPENAI_HOST_SUFFIXES = (
+    ".openai.azure.com",
+    ".services.ai.azure.com",
+    ".cognitiveservices.azure.com",
+)
+
+
+def ai_processor_name(base_url: str) -> str:
+    """The processor named on consent and privacy pages for the configured endpoint."""
+    host = urlsplit(base_url).hostname or ""
+    return "Azure OpenAI (Microsoft)" if host.endswith(AZURE_OPENAI_HOST_SUFFIXES) else "OpenAI"
 
 
 def load_config(
@@ -125,6 +138,9 @@ def load_config(
         "AI_PROVIDER": text("AI_PROVIDER", "openai" if production else "fake"),
         "AI_PROCESSING_ENABLED": flag("AI_PROCESSING_ENABLED", True),
         "OPENAI_API_KEY": text("OPENAI_API_KEY"),
+        # Azure OpenAI: https://<resource>.openai.azure.com/openai/v1/, with SUMMARY_MODEL and
+        # EMBEDDING_MODEL set to the Azure deployment names and OPENAI_API_KEY to its key.
+        "OPENAI_BASE_URL": (text("OPENAI_BASE_URL") or OPENAI_DEFAULT_BASE_URL).rstrip("/"),
         "SUMMARY_MODEL": text("SUMMARY_MODEL", "gpt-4.1-mini-2025-04-14"),
         "EMBEDDING_MODEL": text("EMBEDDING_MODEL", "text-embedding-3-small"),
         "EMBEDDING_DIMENSIONS": 512,
@@ -182,6 +198,7 @@ def load_config(
     }
     if overrides:
         config.update(overrides)
+    config["AI_PROCESSOR_NAME"] = ai_processor_name(config["OPENAI_BASE_URL"])
     validate_config(config)
     return config
 
@@ -248,6 +265,19 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ConfigError("Real Gmail requires non-demo session and encryption keys")
     if config["AI_PROVIDER"] == "openai" and config["AI_PROCESSING_ENABLED"]:
         require("OPENAI_API_KEY", "SUMMARY_MODEL", "EMBEDDING_MODEL")
+    endpoint = urlsplit(config["OPENAI_BASE_URL"])
+    endpoint_host = endpoint.hostname or ""
+    if (
+        endpoint.scheme != "https"
+        or endpoint.username
+        or endpoint.password
+        or endpoint.query
+        or endpoint.fragment
+        or not (
+            endpoint_host == "api.openai.com" or endpoint_host.endswith(AZURE_OPENAI_HOST_SUFFIXES)
+        )
+    ):
+        raise ConfigError("OPENAI_BASE_URL must be the OpenAI API or an Azure OpenAI endpoint")
     if config["SYNC_MODE"] == "push":
         if config["MAIL_MODE"] != "gmail":
             raise ConfigError("Push mode requires real Gmail")

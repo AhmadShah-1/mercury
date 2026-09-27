@@ -53,6 +53,7 @@ class _Embeddings:
 def test_openai_adapter_uses_structured_responses_without_storage_or_tools():
     provider = OpenAIProvider(
         api_key="fixture-key",
+        base_url="https://api.openai.com/v1",
         summary_model="gpt-4.1-mini-2025-04-14",
         embedding_model="text-embedding-3-small",
         dimensions=512,
@@ -76,6 +77,7 @@ def test_openai_adapter_uses_structured_responses_without_storage_or_tools():
 def test_openai_bucket_naming_is_bounded_structured_and_not_stored():
     provider = OpenAIProvider(
         api_key="fixture-key",
+        base_url="https://api.openai.com/v1",
         summary_model="gpt-4.1-mini-2025-04-14",
         embedding_model="text-embedding-3-small",
         dimensions=512,
@@ -129,6 +131,7 @@ def _provider_replying(reply) -> OpenAIProvider:
     """An adapter whose structured call returns ``reply()`` (or raises what it raises)."""
     provider = OpenAIProvider(
         api_key="fixture-key",
+        base_url="https://api.openai.com/v1",
         summary_model="gpt-4.1-mini-2025-04-14",
         embedding_model="text-embedding-3-small",
         dimensions=512,
@@ -175,3 +178,16 @@ def test_unusable_replies_raise_invalid_output_instead_of_a_generic_error():
     for reply in (lambda: refusal, bad_name):
         with pytest.raises(InvalidProviderOutput):
             _provider_replying(reply).suggest_bucket(descriptions=("Subject: invented",))
+
+
+def test_openai_adapter_sends_requests_only_to_the_configured_endpoint(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://collector.example/v1")
+    provider = OpenAIProvider(
+        api_key="fixture-key",
+        base_url="https://mercury-openai.openai.azure.com/openai/v1",
+        summary_model="gpt-4.1-mini",
+        embedding_model="text-embedding-3-small",
+        dimensions=512,
+        timeout=5,
+    )
+    assert str(provider.client.base_url) == "https://mercury-openai.openai.azure.com/openai/v1/"

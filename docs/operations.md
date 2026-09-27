@@ -19,7 +19,7 @@ The deploy workflow passes `appHostname` (the `APP_BASE_URL` host) to Bicep beca
 | Azure resource names (tagged `environment=<name>`) | `mercury-<role>-staging` | `mercury-<role>-production` |
 | PostgreSQL host in `DATABASE_URL` | `mercury-postgres-staging.postgres.database.azure.com` | `mercury-postgres-production.postgres.database.azure.com` |
 
-Both environments share the operator-created `Mercury` resource group and one container registry (registry names allow only letters and digits, so it has no suffix). Each GitHub environment needs its own federated credential with subject `repo:OWNER/REPO:environment:<name>`. Never point one environment's Doppler config at another's database.
+Both environments share the operator-created `Mercury` resource group and one container registry (registry names allow only letters and digits, so it has no suffix). Each GitHub environment needs its own federated credential whose subject matches the claim GitHub presents exactly. This repository's claims include immutable owner/repository IDs (`repo:AhmadShah-1@117304625/mercury@1389706333:environment:<name>`); when in doubt, copy the `subject claim` line printed by the `azure/login` step. Never point one environment's Doppler config at another's database.
 
 ## Custom domain
 

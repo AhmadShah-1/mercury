@@ -39,7 +39,7 @@
       {% if config.AI_PROVIDER == "fake" %}
         <p>In this demo the AI is synthetic and offline; fixture output is clearly marked.</p>
       {% else %}
-        <p>Only if you allow it below: bounded, selected message text is sent to OpenAI for summaries and embeddings, with response storage disabled. The provider's abuse-monitoring retention still applies.</p>
+        <p>Only if you allow it below: bounded, selected message text is sent to {{ config.AI_PROCESSOR_NAME }} for summaries and embeddings, with response storage disabled. The provider's abuse-monitoring retention still applies.</p>
       {% endif %}
       <p>If you don't allow it, no message text is sent. You still get buckets you create, sender rules, and the reader.</p>
     </article>

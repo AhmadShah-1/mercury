@@ -15,12 +15,14 @@ class OpenAIProvider:
         self,
         *,
         api_key: str,
+        base_url: str,
         summary_model: str,
         embedding_model: str,
         dimensions: int,
         timeout: int,
     ):
-        self.client = OpenAI(api_key=api_key, timeout=timeout, max_retries=1)
+        # base_url is always explicit so an ambient OPENAI_BASE_URL can never redirect traffic.
+        self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout, max_retries=1)
         self.summary_model = summary_model
         self.embedding_model = embedding_model
         self.dimensions = dimensions
