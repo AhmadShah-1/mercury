@@ -184,6 +184,8 @@ def test_workspace_views_filter_owned_rows_and_escape_bucket_names(app, client, 
 
     unsorted = client.get("/app?view=unsorted")
     assert b"Unsorted" in unsorted.data
+    assert b'data-system-bucket="unsorted"' in unsorted.data
+    assert b">Misc</a>" in unsorted.data
 
 
 def test_progress_partial_polls_only_while_active_and_is_owner_checked(app, client, connected):

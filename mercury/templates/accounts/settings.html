@@ -38,6 +38,27 @@
       {% if account.connection_state == "reconnect_required" %}
         <div class="state-actions">{% call state("Gmail needs to be reconnected", "warning", "unplug") %}<p>Mercury's access expired or was revoked. Already-indexed data stays available until you disconnect.</p><a class="btn btn-sm btn-primary" href="{{ url_for('accounts.connect_page') }}">Reconnect Gmail</a>{% endcall %}</div>
       {% endif %}
+      {% if account.connection_state == "connected" %}
+      <div class="settings-sync" aria-labelledby="refresh-heading">
+        <div>
+          <h3 id="refresh-heading">Refresh mailbox</h3>
+          <p>{% if config.SYNC_MODE in ["poll", "push"] %}Mercury checks for changes automatically. Use this only when you need an immediate refresh.{% else %}Check Gmail for changes since the last refresh.{% endif %}</p>
+        </div>
+        <form method="post" action="{{ url_for('inbox.sync') }}">
+          {{ sync_form.hidden_tag() }}
+          <button class="btn btn-quiet btn-sm" type="submit" data-busy-label="Refreshing…">{{ icon("refresh", "icon-sm") }} Refresh now</button>
+        </form>
+      </div>
+      {% if config.APP_ENV != "production" %}
+      <details class="developer-tools">
+        <summary>Developer tools</summary>
+        <form method="post" action="{{ url_for('inbox.full_rebuild') }}" data-confirm="Re-lists every conversation in the lookback window, which uses Gmail quota. AI still runs only for conversations whose content changed." data-confirm-title="Run a full rebuild?" data-confirm-label="Rebuild">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-ghost btn-sm" type="submit">{{ icon("database", "icon-sm") }} Full rebuild</button>
+        </form>
+      </details>
+      {% endif %}
+      {% endif %}
     {% else %}
       {% call state("No Gmail account is connected", "neutral", "unplug") %}
         <p>Connect a mailbox to index a bounded, recent window and start organizing.</p>

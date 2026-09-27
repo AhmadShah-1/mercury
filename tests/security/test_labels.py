@@ -50,6 +50,19 @@ def test_label_writer_requires_every_runtime_gate(app, connected, monkeypatch):
         assert provider.created[0].startswith("Mercury/")
         assert provider.applied[0][1] == ["Label_mercury_owned"]
 
+        assignment.bucket_id = None
+        assignment.origin = "user"
+        assignment.locked_by_user = True
+        db.session.commit()
+        apply_owned_label(
+            account_id=account.id,
+            user_id=account.user_id,
+            thread_id=assignment.thread_id,
+            bucket_id=None,
+            connection_generation=account.connection_generation,
+        )
+        assert provider.applied[-1][1:] == ([], ["Label_mercury_owned"])
+
         with pytest.raises(LabelWriteDenied):
             apply_owned_label(
                 account_id=account.id,

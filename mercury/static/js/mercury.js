@@ -192,7 +192,7 @@
     dialog.querySelector("button[value='cancel']")?.focus();
   });
 
-  /* Busy labels for long-ish plain form posts (e.g. Sync now). */
+  /* Busy labels for long-ish plain form posts (e.g. Refresh now). */
   doc.addEventListener("submit", (event) => {
     if (event.defaultPrevented) return;
     const button = event.target.querySelector?.("[data-busy-label]");

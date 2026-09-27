@@ -12,6 +12,11 @@ from mercury.buckets.models import Bucket, BucketAssignment, SenderRule
 from mercury.extensions import db
 from mercury.inbox.models import EmailThread
 
+# Form and drag/drop value for the built-in, non-persisted Unsorted destination. Keeping this
+# out of the buckets table prevents it from being renamed, archived, classified against, or
+# mirrored to Gmail as though it were a user category.
+UNSORTED_VALUE = "unsorted"
+
 
 def active_buckets(user_id: uuid.UUID) -> list[Bucket]:
     return list(

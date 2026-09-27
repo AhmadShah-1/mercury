@@ -29,7 +29,7 @@ def apply_owned_label(
     account_id: uuid.UUID,
     user_id: uuid.UUID,
     thread_id: uuid.UUID,
-    bucket_id: uuid.UUID,
+    bucket_id: uuid.UUID | None,
     connection_generation: int,
 ) -> None:
     account = db.session.scalar(
@@ -45,21 +45,34 @@ def apply_owned_label(
             EmailThread.gmail_account_id == account_id,
         )
     )
-    bucket = db.session.scalar(
-        select(Bucket).where(
-            Bucket.id == bucket_id,
-            Bucket.user_id == user_id,
-            Bucket.gmail_account_id == account_id,
+    bucket = (
+        db.session.scalar(
+            select(Bucket).where(
+                Bucket.id == bucket_id,
+                Bucket.user_id == user_id,
+                Bucket.gmail_account_id == account_id,
+            )
         )
+        if bucket_id is not None
+        else None
     )
-    assignment = db.session.scalar(
-        select(BucketAssignment).where(
-            BucketAssignment.thread_id == thread_id,
-            BucketAssignment.user_id == user_id,
-            BucketAssignment.bucket_id == bucket_id,
-        )
+    assignment_query = select(BucketAssignment).where(
+        BucketAssignment.thread_id == thread_id,
+        BucketAssignment.user_id == user_id,
+        BucketAssignment.gmail_account_id == account_id,
     )
-    if account is None or thread is None or bucket is None or assignment is None:
+    assignment_query = assignment_query.where(
+        BucketAssignment.bucket_id == bucket_id
+        if bucket_id is not None
+        else BucketAssignment.bucket_id.is_(None)
+    )
+    assignment = db.session.scalar(assignment_query)
+    if (
+        account is None
+        or thread is None
+        or assignment is None
+        or (bucket_id is not None and bucket is None)
+    ):
         raise LookupError("label_target_not_found")
     if (
         not current_app.config["GMAIL_LABEL_WRITES_ENABLED"]
@@ -71,6 +84,24 @@ def apply_owned_label(
     ):
         raise LabelWriteDenied("label_write_not_enabled")
 
+    provider = current_app.extensions["mercury"]["mail_provider"](account)
+    if bucket is None:
+        # Unsorted is deliberately not a Gmail label. Moving here only removes labels that
+        # Mercury created and recorded; user-created labels are never listed or touched.
+        owned_ids = list(
+            db.session.scalars(
+                select(GmailLabelMapping.gmail_label_id).where(
+                    GmailLabelMapping.gmail_account_id == account_id,
+                    GmailLabelMapping.user_id == user_id,
+                )
+            )
+        )
+        db.session.refresh(account)
+        if account.connection_generation != connection_generation:
+            raise LabelWriteDenied("stale_connection_generation")
+        provider.apply_label(thread.gmail_thread_id, add=[], remove=owned_ids)
+        return
+
     mapping = db.session.scalar(
         select(GmailLabelMapping).where(
             GmailLabelMapping.bucket_id == bucket.id,
@@ -78,7 +109,6 @@ def apply_owned_label(
             GmailLabelMapping.gmail_account_id == account_id,
         )
     )
-    provider = current_app.extensions["mercury"]["mail_provider"](account)
     if mapping is None:
         desired_name = _label_name(bucket)
         label_id = provider.create_label(desired_name)

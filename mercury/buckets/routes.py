@@ -19,6 +19,7 @@ from mercury.buckets.crates import (
     rename_crate,
     set_bucket_favorite,
     set_crate_favorite,
+    unsorted_size,
 )
 from mercury.buckets.forms import (
     BucketForm,
@@ -69,7 +70,12 @@ def _done(message: str, default: str):
 
 
 def _library(**selected):
-    return build_library(current_user.id, buckets=active_buckets(current_user.id), **selected)
+    return build_library(
+        current_user.id,
+        buckets=active_buckets(current_user.id),
+        unsorted_count=unsorted_size(current_user.id),
+        **selected,
+    )
 
 
 @bp.route("/app/buckets/new", methods=["GET", "POST"])

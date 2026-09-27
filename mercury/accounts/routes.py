@@ -179,6 +179,7 @@ def _render_settings(delete_form, status: int = 200):
     return render_template(
         "accounts/settings.html",
         disconnect_form=EmptyForm(),
+        sync_form=EmptyForm(),
         delete_form=delete_form,
         label_form=label_form,
         label_counts=_label_sync_counts() if current_user.gmail_account else {},

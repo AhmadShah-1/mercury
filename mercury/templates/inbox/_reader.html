@@ -94,8 +94,7 @@
       {{ move_form.csrf_token }}
       <label class="visually-hidden" for="move-{{ thread.id }}">Move this conversation to</label>
       <select class="form-select form-select-sm" id="move-{{ thread.id }}" name="{{ move_form.bucket_id.name }}" required>
-        {% if not in_bucket %}<option value="" selected disabled>Choose a bucket…</option>{% endif %}
-        {% for value, label in move_form.bucket_id.choices %}<option value="{{ value }}"{% if in_bucket and value == bucket.id|string %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        {% for value, label in move_form.bucket_id.choices %}<option value="{{ value }}"{% if value == move_form.bucket_id.data %} selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
       <button class="btn btn-quiet btn-sm" type="submit">Move</button>
     </form>

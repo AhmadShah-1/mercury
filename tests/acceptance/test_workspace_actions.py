@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from mercury.buckets.models import Bucket, BucketAssignment
+from mercury.buckets.models import Bucket, BucketAssignment, Crate
 from mercury.extensions import db
 from mercury.inbox.models import EmailThread, ThreadAnalysis
 from tests.conftest import csrf_token
@@ -89,3 +89,32 @@ def test_workspace_bucket_move_action_and_reversible_crate(app, client, connecte
     with app.app_context():
         assert db.session.get(Bucket, source_id).crate_id is None
         assert db.session.get(Bucket, destination_id).crate_id is None
+
+
+def test_unsorted_is_a_fixed_misc_bucket_and_manual_destination(app, client, connected):
+    with app.app_context():
+        assignment = db.session.scalar(
+            select(BucketAssignment).where(BucketAssignment.bucket_id.is_not(None))
+        )
+        thread = db.session.get(EmailThread, assignment.thread_id)
+        thread_id, subject = thread.id, thread.subject
+        bucket_count = len(db.session.scalars(select(Bucket)).all())
+        misc_id = db.session.scalar(select(Crate).where(Crate.kind == "misc")).id
+
+    reader = client.get(f"/app/threads/{thread_id}")
+    moved = client.post(
+        f"/app/threads/{thread_id}/move",
+        data={"bucket_id": "unsorted", "csrf_token": csrf_token(reader)},
+        follow_redirects=False,
+    )
+    assert moved.status_code == 302
+
+    with app.app_context():
+        assignment = db.session.scalar(
+            select(BucketAssignment).where(BucketAssignment.thread_id == thread_id)
+        )
+        assert assignment.bucket_id is None and assignment.locked_by_user
+        assert len(db.session.scalars(select(Bucket)).all()) == bucket_count
+
+    assert subject.encode() in client.get("/app?view=unsorted").data
+    assert subject.encode() in client.get(f"/app/crates/{misc_id}").data

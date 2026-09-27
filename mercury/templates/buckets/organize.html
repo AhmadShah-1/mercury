@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "components/icons.html" import icon %}
 {% from "components/ui.html" import badge, csrf_input, empty %}
-{% from "components/crates.html" import star_toggle, bucket_tile, next_input %}
+{% from "components/crates.html" import star_toggle, bucket_tile, unsorted_tile, next_input %}
 {% block title %}Organize crates and buckets — Mercury{% endblock %}
 {% block body_class %}app-page organize-page{% endblock %}
 {% block footer %}{% endblock %}
@@ -33,8 +33,16 @@
         <p class="org-section-hint"><span class="hint-drag">Drop one of these onto another to make a crate of both. Drop any bucket here to take it out of its crate.</span><span class="hint-touch">Buckets that aren't in a crate.</span></p>
       </div>
       <ul class="tile-list" role="list" aria-labelledby="loose-title">
-        {% for bucket in lib.loose %}{{ bucket_tile(bucket, lib, next_path) }}{% endfor %}
+        {% for bucket in lib.loose[:6] %}{{ bucket_tile(bucket, lib, next_path) }}{% endfor %}
       </ul>
+      {% if lib.loose|length > 6 %}
+      <details class="tile-overflow">
+        <summary><span class="when-closed">Show {{ lib.loose|length - 6 }} more</span><span class="when-open">Show fewer</span></summary>
+        <ul class="tile-list" role="list" aria-label="More buckets not in a crate">
+          {% for bucket in lib.loose[6:] %}{{ bucket_tile(bucket, lib, next_path) }}{% endfor %}
+        </ul>
+      </details>
+      {% endif %}
       <p class="tray-empty{% if not lib.loose %} is-shown{% endif %}">{{ icon("check-circle", "icon-sm") }} Every bucket is in a crate.</p>
     </section>
 
@@ -78,12 +86,14 @@
         {% set members = lib.members.get(crate.id, []) %}
         {% set size = lib.crate_size.get(crate.id, 0) %}
         {% set others = lib.crates|rejectattr("id", "equalto", crate.id)|list %}
-        <li class="crate-card{% if crate.is_misc %} is-misc{% endif %}{% if not members %} is-empty{% endif %}" data-drop="crate" data-crate-id="{{ crate.id }}" data-name="{{ crate.name }}" data-focus-key="crate-{{ crate.id }}">
+        {% set visible_limit = 5 if crate.is_misc else 6 %}
+        {% set member_count = members|length + (1 if crate.is_misc else 0) %}
+        <li class="crate-card{% if crate.is_misc %} is-misc{% endif %}{% if not members and not crate.is_misc %} is-empty{% endif %}" data-drop="crate" data-crate-id="{{ crate.id }}" data-name="{{ crate.name }}" data-focus-key="crate-{{ crate.id }}">
           <div class="crate-card-head"{% if members %} draggable="true" data-drag="crate" data-crate-id="{{ crate.id }}" data-name="{{ crate.name }}" data-combine-url="{{ url_for('buckets.crate_combine', crate_id=crate.id) }}"{% endif %}>
             <span class="crate-card-icon" aria-hidden="true">{{ icon("crate") }}</span>
             <div class="crate-card-title">
               <h3 class="crate-card-name"><a href="{{ url_for('inbox.crate_workspace', crate_id=crate.id) }}" draggable="false">{{ crate.name }}</a></h3>
-              <p class="crate-card-meta">{{ members|length }} {{ "bucket" if members|length == 1 else "buckets" }} · {{ size }} {{ "conversation" if size == 1 else "conversations" }}</p>
+              <p class="crate-card-meta">{{ member_count }} {{ "bucket" if member_count == 1 else "buckets" }} · {{ size }} {{ "conversation" if size == 1 else "conversations" }}</p>
             </div>
             <div class="crate-card-actions">
               {{ star_toggle("crate", crate, next_path, small=True) }}
@@ -124,11 +134,20 @@
             </div>
           </div>
           {% if crate.is_misc %}
-          <p class="crate-note">{{ badge("Automatic", "neutral", "sparkle") }} Mercury keeps its own suggested buckets here while they have fewer than {{ lib.misc_threshold }} conversations. Buckets you place yourself stay put.</p>
+          <p class="crate-note">{{ badge("Automatic", "neutral", "sparkle") }} Mercury keeps Unsorted and its own suggested buckets here while they have fewer than {{ lib.misc_threshold }} conversations. Buckets you place yourself stay put.</p>
           {% endif %}
           <ul class="tile-list" role="list" aria-label="Buckets in {{ crate.name }}">
-            {% for bucket in members %}{{ bucket_tile(bucket, lib, next_path) }}{% endfor %}
+            {% if crate.is_misc %}{{ unsorted_tile(lib.unsorted_count) }}{% endif %}
+            {% for bucket in members[:visible_limit] %}{{ bucket_tile(bucket, lib, next_path) }}{% endfor %}
           </ul>
+          {% if members|length > visible_limit %}
+          <details class="tile-overflow">
+            <summary><span class="when-closed">Show {{ members|length - visible_limit }} more</span><span class="when-open">Show fewer</span></summary>
+            <ul class="tile-list" role="list" aria-label="More buckets in {{ crate.name }}">
+              {% for bucket in members[visible_limit:] %}{{ bucket_tile(bucket, lib, next_path) }}{% endfor %}
+            </ul>
+          </details>
+          {% endif %}
           <p class="crate-empty">{{ icon("bucket", "icon-sm") }} <span class="hint-drag">Drop buckets here</span><span class="hint-touch">Empty · use a bucket's move button</span></p>
         </li>
         {% endfor %}

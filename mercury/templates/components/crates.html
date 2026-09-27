@@ -77,11 +77,21 @@ draggable="true" data-drag="bucket" data-bucket-id="{{ bucket.id }}" data-place-
 <li class="tile{% if bucket.favorite %} is-starred{% endif %}" {{ bucket_drag(bucket, library) }} data-drop="tile" data-focus-key="tile-{{ bucket.id }}">
   <span class="tile-grip js-only" aria-hidden="true">{{ icon("grip", "icon-sm") }}</span>
   <span class="tile-icon" aria-hidden="true">{{ icon("bucket", "icon-sm") }}</span>
-  <a class="tile-name" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) }}" draggable="false"{% if bucket.shows_ai_name %} title="Mercury: {{ bucket.ai_name }}"{% endif %}>{{ bucket.name }}</a>
+  <a class="tile-name" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) }}" draggable="false" title="{{ bucket.name }}{% if bucket.shows_ai_name %} · Mercury: {{ bucket.ai_name }}{% endif %}">{{ bucket.name }}</a>
   <span class="tile-count" title="{{ size }} {{ 'conversation' if size == 1 else 'conversations' }}">{{ size }}<span class="visually-hidden"> {{ "conversation" if size == 1 else "conversations" }}</span></span>
   <span class="tile-actions">
     {{ star_toggle("bucket", bucket, next, small=True) }}
     {{ place_menu(bucket, library, next) }}
   </span>
+</li>
+{%- endmacro %}
+
+{#- Unsorted is a fixed virtual bucket: it can receive conversations but cannot be edited. -#}
+{% macro unsorted_tile(size) -%}
+<li class="tile tile-system" title="Unsorted · Mercury keeps uncertain conversations here">
+  <span class="tile-icon" aria-hidden="true">{{ icon("unsorted", "icon-sm") }}</span>
+  <a class="tile-name" href="{{ url_for('inbox.workspace', view='unsorted') }}">Unsorted</a>
+  <span class="tile-count" title="{{ size }} {{ 'conversation' if size == 1 else 'conversations' }}">{{ size }}<span class="visually-hidden"> {{ "conversation" if size == 1 else "conversations" }}</span></span>
+  <span class="system-tag">Automatic</span>
 </li>
 {%- endmacro %}

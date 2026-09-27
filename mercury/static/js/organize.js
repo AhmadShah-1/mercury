@@ -546,11 +546,13 @@
     row.dataset.bucketId = bucketId;
     const badge = row.querySelector(".row-meta > .badge-m");
     if (!badge) return;
-    badge.classList.remove("badge-muted");
-    badge.classList.add("badge-bucket");
+    const unsorted = bucketId === "unsorted";
+    badge.classList.toggle("badge-muted", unsorted);
+    badge.classList.toggle("badge-bucket", !unsorted);
     if (badge.lastElementChild) badge.lastElementChild.textContent = name;
     const icon = badge.querySelector("svg");
-    const pail = doc.querySelector('[data-drop="bucket"] svg')?.cloneNode(true);
+    const pail = doc.querySelector(`[data-bucket-id="${CSS.escape(bucketId)}"] svg`)?.cloneNode(true)
+      || doc.querySelector('[data-drop="bucket"] svg')?.cloneNode(true);
     if (icon && pail) {
       pail.setAttribute("class", "icon icon-xs");
       icon.replaceWith(pail);

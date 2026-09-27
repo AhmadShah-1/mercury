@@ -9,6 +9,7 @@ from sqlalchemy import select
 from mercury.accounts.models import User
 from mercury.buckets.crates import create_crate
 from mercury.buckets.models import Bucket, Crate
+from mercury.buckets.service import create_bucket
 from mercury.extensions import db
 from tests.conftest import csrf_token
 
@@ -30,13 +31,17 @@ def test_sidebar_puts_crates_above_buckets_with_one_edit_view(app, client, conne
     assert html.index('id="crates-heading"') < html.index('id="buckets-heading"')
     crates = _section(html, "crates-heading")
     assert "Misc" in crates and 'href="/app/organize"' in crates
+    assert crates.count('href="/app/organize"') == 1
     assert "buckets.merge" not in html and "/merge" not in html
     with app.app_context():
         assert len(db.session.scalars(select(Bucket)).all()) == 4
     # Four equal-sized buckets: the largest three are shown, and the rest are one click away.
     buckets = _section(html, "buckets-heading")
     assert len(re.findall(r'data-drag="bucket"', buckets)) == 3
-    assert "star to pin" in buckets
+    assert "star to pin" not in html
+    assert "All crates &amp; buckets" not in html
+    assert "All indexed threads" not in html
+    assert re.search(r'<span class="nav-label">Overview</span><span class="nav-count"', html)
 
 
 def test_starring_pins_items_per_section_without_starring_crate_members(app, client, connected):
@@ -56,7 +61,7 @@ def test_starring_pins_items_per_section_without_starring_crate_members(app, cli
     crates = _section(html, "crates-heading")
     assert "Desk" in crates and "Misc" not in crates
     # Buckets are still unpinned: starring Desk did not star Work.
-    assert "star to pin" in _section(html, "buckets-heading")
+    assert "Finance" in _section(html, "buckets-heading")
 
     client.post(f"/app/buckets/{finance_id}/favorite", data={"favorite": "1", "csrf_token": token})
     buckets = _section(client.get("/app").data.decode(), "buckets-heading")
@@ -72,11 +77,40 @@ def test_organize_view_shows_every_crate_and_bucket_with_plain_form_fallbacks(
     response = client.get("/app/organize")
     assert response.status_code == 200
     html = response.data.decode()
-    for name in ("Work", "Finance", "Purchases", "Newsletters", "Misc", "Automatic"):
+    for name in ("Work", "Finance", "Purchases", "Newsletters", "Misc", "Unsorted", "Automatic"):
         assert name in html
     forms = re.findall(r"<form\b[^>]*method=\"post\"[^>]*>.*?</form>", html, re.S)
     assert forms and all('name="csrf_token"' in form for form in forms)
     assert 'data-drop="new-crate"' in html and 'data-drop="loose"' in html
+    assert 'class="tile tile-system"' in html
+
+
+def test_workspace_keeps_identity_and_status_but_moves_refresh_to_settings(client, connected):
+    workspace = client.get("/app").data.decode()
+    assert "Alex Mercury" in workspace and "alex@example.invalid" in workspace
+    assert "Connected" in workspace and "Synced" in workspace
+    assert "Refresh now" not in workspace and "Full rebuild" not in workspace
+    assert workspace.count('href="/settings"') == 1  # top navigation only
+
+    settings = client.get("/settings").data.decode()
+    assert 'action="/app/sync"' in settings and "Refresh now" in settings
+    assert 'action="/app/sync/full"' in settings and "Full rebuild" in settings
+
+
+def test_organize_collapses_large_groups_and_exposes_full_bucket_names(app, client, connected):
+    long_name = "A deliberately long category name that needs more than one line"
+    with app.app_context():
+        user = db.session.scalar(select(User))
+        for index in range(7):
+            create_bucket(
+                user.id,
+                user.gmail_account.id,
+                long_name if index == 0 else f"Personal category {index}",
+            )
+
+    html = client.get("/app/organize").data.decode()
+    assert "Show 1 more" in html
+    assert f'title="{long_name}"' in html
 
 
 def test_bucket_and_crate_pages_offer_crate_controls_instead_of_merge(app, client, connected):

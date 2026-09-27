@@ -16,7 +16,7 @@
 {%- set sender = thread.participants[-1] if thread.participants else {} -%}
 {%- set state = ai_state(thread, analysis, account)|trim -%}
 {%- set opened = thread.last_opened_at is not none -%}
-<li class="thread-row{% if thread.gmail_unread %} is-unread{% endif %}{% if not opened %} is-new{% endif %}{% if current %} is-current{% endif %}" id="thread-{{ thread.id }}" data-thread-row data-move-url="{{ url_for('inbox.move', thread_id=thread.id) }}" data-bucket-id="{{ bucket.id if bucket and not bucket.archived else '' }}"{% if oob %} hx-swap-oob="true"{% endif %}>
+<li class="thread-row{% if thread.gmail_unread %} is-unread{% endif %}{% if not opened %} is-new{% endif %}{% if current %} is-current{% endif %}" id="thread-{{ thread.id }}" data-thread-row data-move-url="{{ url_for('inbox.move', thread_id=thread.id) }}" data-bucket-id="{{ bucket.id if bucket and not bucket.archived else 'unsorted' }}"{% if oob %} hx-swap-oob="true"{% endif %}>
   <label class="row-select js-only">
     <input type="checkbox" class="form-check-input" data-row-select value="{{ thread.id }}">
     <span class="visually-hidden">Select “{{ thread.subject }}”</span>

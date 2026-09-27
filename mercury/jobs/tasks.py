@@ -216,7 +216,7 @@ def apply_owned_label_task(
     account_id: str,
     user_id: str,
     thread_id: str,
-    bucket_id: str,
+    bucket_id: str | None,
     connection_generation: int,
 ) -> None:
     with _app().app_context():
@@ -225,7 +225,7 @@ def apply_owned_label_task(
                 account_id=uuid.UUID(account_id),
                 user_id=uuid.UUID(user_id),
                 thread_id=uuid.UUID(thread_id),
-                bucket_id=uuid.UUID(bucket_id),
+                bucket_id=uuid.UUID(bucket_id) if bucket_id else None,
                 connection_generation=connection_generation,
             )
 
@@ -450,14 +450,15 @@ def enqueue_sync(queue_app, account: GmailAccount, run: ProcessingRun | None = N
 
 
 def enqueue_label(queue_app, account: GmailAccount, *, thread_id, bucket_id) -> int | None:
+    bucket_key = str(bucket_id) if bucket_id else "unsorted"
     return _defer(
         queue_app,
         "mercury:apply_owned_label",
         lock=f"account:{account.id}",
-        queueing_lock=f"label:{thread_id}:{bucket_id}",
+        queueing_lock=f"label:{thread_id}:{bucket_key}",
         account_id=str(account.id),
         user_id=str(account.user_id),
         thread_id=str(thread_id),
-        bucket_id=str(bucket_id),
+        bucket_id=str(bucket_id) if bucket_id else None,
         connection_generation=account.connection_generation,
     )

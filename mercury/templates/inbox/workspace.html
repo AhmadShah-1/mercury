@@ -30,8 +30,8 @@
   <aside class="ws-nav" aria-label="Workspace navigation">
     <nav class="ws-nav-scroll" data-ws-nav>
       <ul class="nav-list" role="list">
-        {% set view_icons = {"overview": "grid", "attention": "flag", "all": "layers", "unsorted": "unsorted"} %}
-        {% set view_counts = {"overview": None, "attention": counts.attention, "all": counts.total, "unsorted": counts.unsorted} %}
+        {% set view_icons = {"overview": "grid", "attention": "flag"} %}
+        {% set view_counts = {"overview": counts.total, "attention": counts.attention} %}
         {% for key, label in views.items() %}
         <li><a class="nav-item" href="{{ url_for('inbox.workspace') if key == 'overview' else url_for('inbox.workspace', view=key) }}"{% if not selected_bucket and not selected_crate and view == key %} aria-current="page"{% endif %}>
           {{ icon(view_icons[key]) }}<span class="nav-label">{{ label }}</span>{{ count(view_counts[key], "conversations") }}
@@ -56,24 +56,25 @@
             </a>
             {% if expanded %}
             <ul class="nav-sublist" role="list" aria-label="Buckets in {{ crate.name }}">
+              {% if crate.is_misc %}
+              <li><a class="nav-item nav-subitem" href="{{ url_for('inbox.workspace', view='unsorted') }}" data-drop="bucket" data-system-bucket="unsorted" data-bucket-id="{{ unsorted_value }}" data-name="Unsorted"{% if view == "unsorted" and not selected_bucket and not selected_crate %} aria-current="page"{% endif %}>
+                {{ icon("unsorted") }}<span class="nav-label">Unsorted</span>{{ count(lib.unsorted_count, "conversations") }}
+              </a></li>
+              {% endif %}
               {% for member in lib.members.get(crate.id, []) %}
               <li><a class="nav-item nav-subitem" href="{{ url_for('inbox.bucket_workspace', bucket_id=member.id) }}" {{ bucket_drag(member, lib) }} data-drop="bucket"{% if member.shows_ai_name %} title="Mercury: {{ member.ai_name }}"{% endif %}{% if (selected_bucket and selected_bucket.id == member.id) %} aria-current="page"{% elif crate_filter and crate_filter.id == member.id %} aria-current="true"{% endif %}>
                 {{ icon("bucket") }}<span class="nav-label">{{ member.name }}</span>{% if member.meaning_updated %}<span class="meaning-dot"><span class="visually-hidden">Meaning updated</span></span>{% endif %}{{ count(lib.bucket_size.get(member.id, 0), "conversations") }}
               </a></li>
-              {% else %}
+            {% else %}
+              {% if not crate.is_misc %}
               <li class="nav-subempty">Empty · <a href="{{ url_for('buckets.organize') }}">add buckets</a></li>
+              {% endif %}
               {% endfor %}
             </ul>
             {% endif %}
           </li>
           {% endfor %}
         </ul>
-        {% endif %}
-        {% set hidden_crates = lib.crates|length - lib.nav_crates|length %}
-        {% if not lib.crates|rejectattr("is_misc")|list %}
-        <p class="nav-hint nav-hint-quiet">Gather related buckets into a crate with <a href="{{ url_for('buckets.organize') }}">Edit</a>.</p>
-        {% elif not lib.crates_pinned and hidden_crates > 0 %}
-        <p class="nav-hint nav-hint-quiet" title="Star crates to pin them here">{{ icon("star", "icon-xs") }} Largest 3 · star to pin</p>
         {% endif %}
       </div>
       <div class="nav-group nav-group-buckets">
@@ -89,25 +90,21 @@
           </a></li>
           {% endfor %}
         </ul>
-        {% set hidden_buckets = lib.buckets|length - lib.nav_buckets|length %}
-        {% if not lib.buckets_pinned and hidden_buckets > 0 %}
-        <p class="nav-hint nav-hint-quiet" title="Star buckets to pin them here">{{ icon("star", "icon-xs") }} Largest 3 · star to pin</p>
-        {% endif %}
         {% elif not lib.buckets %}
         <p class="nav-hint">No categories yet. Suggestions appear after indexing, or <a href="{{ url_for('buckets.create') }}">create one</a>.</p>
-        {% endif %}
-        {% if lib.hidden_count > 0 %}
-        <a class="nav-item nav-more" href="{{ url_for('buckets.organize') }}"><span class="nav-label">All crates &amp; buckets</span><span class="nav-more-count" title="{{ lib.hidden_count }} more in Edit">+{{ lib.hidden_count }}<span class="visually-hidden"> more</span></span></a>
         {% endif %}
       </div>
       </div>
       {% endif %}
       <ul class="nav-list nav-list-secondary" role="list">
         <li><a class="nav-item" href="{{ url_for('buckets.rules') }}">{{ icon("funnel") }}<span class="nav-label">Sender rules</span></a></li>
-        <li><a class="nav-item" href="{{ url_for('accounts.settings') }}">{{ icon("settings") }}<span class="nav-label">Settings</span></a></li>
       </ul>
     </nav>
     <div class="sync-card" aria-label="Synchronization status" role="group">
+      <div class="sync-identity">
+        <span class="sync-avatar" aria-hidden="true">{{ icon("user", "icon-sm") }}</span>
+        <span class="sync-person"><strong>{{ current_user.display_name }}</strong><span title="{{ account.mailbox_address }}">{{ account.mailbox_address }}</span></span>
+      </div>
       <div class="sync-row">
         {{ connection_badge(account.connection_state) }}
         {% if account.last_synced_at %}<span class="sync-time">Synced <time datetime="{{ account.last_synced_at.isoformat() }}" data-localtime="relative">{{ account.last_synced_at|shortdate }}</time></span>{% endif %}
@@ -116,22 +113,10 @@
       {% if run_active %}
         <a class="sync-progress" href="{{ url_for('inbox.run_status', run_id=latest_run.id) }}">{{ icon("activity", "icon-sm") }} Processing · view progress</a>
       {% endif %}
-      {% if account.connection_state == "connected" %}
-      <form method="post" action="{{ url_for('inbox.sync') }}">
-        {{ sync_form.hidden_tag() }}
-        <button class="btn btn-quiet btn-sm w-100" type="submit" data-busy-label="Syncing…">{{ icon("refresh", "icon-sm") }} Sync now</button>
-      </form>
-      {% if config.APP_ENV != "production" %}
-      <form method="post" action="{{ url_for('inbox.full_rebuild') }}" data-confirm="Re-lists every conversation in the lookback window, which uses Gmail quota. AI still runs only for conversations whose content changed." data-confirm-title="Run a full rebuild?" data-confirm-label="Rebuild">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn btn-ghost btn-sm w-100" type="submit">{{ icon("database", "icon-sm") }} Full rebuild (dev)</button>
-      </form>
-      {% endif %}
-      {% endif %}
     </div>
   </aside>
 
-  {#- What the list holds, so a conversation dragged elsewhere can leave it in place (UUIDs only). -#}
+  {#- What the list holds, so a conversation dragged elsewhere can leave it in place. -#}
   {% if selected_crate %}
     {% set list_kind = "crate" %}
     {% set list_buckets = [crate_filter] if crate_filter else (library.members.get(selected_crate.id, []) if library else []) %}
@@ -140,7 +125,7 @@
   {% else %}
     {% set list_kind, list_buckets = ("unsorted" if view == "unsorted" else "other"), [] %}
   {% endif %}
-  <section class="ws-list" aria-labelledby="list-title" data-list-region data-list-kind="{{ list_kind }}" data-list-buckets="{{ list_buckets|map(attribute='id')|join(' ') }}">
+  <section class="ws-list" aria-labelledby="list-title" data-list-region data-list-kind="{{ list_kind }}" data-list-buckets="{{ list_buckets|map(attribute='id')|join(' ') }}{% if selected_crate and selected_crate.is_misc and not crate_filter %} {{ unsorted_value }}{% endif %}">
     <header class="list-head" data-list-head>
       <div class="list-title-row">
         <div class="list-title-wrap">
@@ -149,13 +134,14 @@
           {% elif selected_bucket %}
           {% set in_crate = library.crate_of.get(selected_bucket.id) if library else None %}
           <p class="eyebrow eyebrow-kind">{{ icon("bucket", "icon-xs") }}<span>Bucket</span>{% if in_crate %}<span class="eyebrow-in">in <a href="{{ url_for('inbox.crate_workspace', crate_id=in_crate.id) }}">{{ in_crate.name }}</a></span>{% endif %}</p>
+          {% elif view == "unsorted" and library and library.misc_crate %}
+          <p class="eyebrow eyebrow-kind">{{ icon("unsorted", "icon-xs") }}<span>Bucket</span><span class="eyebrow-in">in <a href="{{ url_for('inbox.crate_workspace', crate_id=library.misc_crate.id) }}">{{ library.misc_crate.name }}</a></span></p>
           {% endif %}
           <h1 class="list-title" id="list-title"{% if selected_bucket and selected_bucket.shows_ai_name %} title="Mercury: {{ selected_bucket.ai_name }}"{% endif %}>{{ view_label }}</h1>
         </div>
         <div class="list-head-actions">
           {% if selected_crate %}
             {{ star_toggle("crate", selected_crate, next_path) }}
-            <a class="icon-btn" href="{{ url_for('buckets.organize') }}" title="Edit crates and buckets">{{ icon("pencil") }}<span class="visually-hidden">Edit crates and buckets</span></a>
           {% elif selected_bucket %}
             {{ star_toggle("bucket", selected_bucket, next_path) }}
             {% if library %}{{ place_menu(selected_bucket, library, next_path, summary_icon="crate", summary_class="icon-btn") }}{% endif %}
@@ -170,6 +156,9 @@
       <div class="crate-chips" data-drop="crate" data-crate-id="{{ selected_crate.id }}" data-name="{{ selected_crate.name }}">
         <ul class="chip-list" role="list" aria-label="Buckets in {{ selected_crate.name }}">
           <li><a class="chip" href="{{ url_for('inbox.crate_workspace', crate_id=selected_crate.id) }}"{% if not crate_filter %} aria-current="page"{% endif %}><span class="chip-label">All</span><span class="chip-count">{{ library.crate_size.get(selected_crate.id, 0) }}<span class="visually-hidden"> conversations</span></span></a></li>
+          {% if selected_crate.is_misc %}
+          <li><a class="chip" href="{{ url_for('inbox.workspace', view='unsorted') }}">{{ icon("unsorted", "icon-xs") }}<span class="chip-label">Unsorted</span><span class="chip-count">{{ library.unsorted_count }}<span class="visually-hidden"> conversations</span></span></a></li>
+          {% endif %}
           {% for member in members %}
           <li><a class="chip" href="{{ url_for('inbox.crate_workspace', crate_id=selected_crate.id, bucket=member.id) }}" {{ bucket_drag(member, library) }} data-drop="bucket"{% if crate_filter and crate_filter.id == member.id %} aria-current="page"{% endif %}>{{ icon("bucket", "icon-xs") }}<span class="chip-label">{{ member.name }}</span><span class="chip-count">{{ library.bucket_size.get(member.id, 0) }}<span class="visually-hidden"> conversations</span></span></a></li>
           {% endfor %}
@@ -281,7 +270,7 @@
     {% else %}
       {% if selected_crate %}
         {% if library and not library.members.get(selected_crate.id) %}
-        {% call empty("This crate is empty", "crate") %}<p>{% if selected_crate.is_misc %}Mercury files its small suggested buckets here automatically. {% endif %}Use “Add bucket” above, or <a href="{{ url_for('buckets.organize') }}">open Edit</a> to drag buckets in.</p>{% endcall %}
+        {% call empty("This crate is empty", "crate") %}<p>{% if selected_crate.is_misc %}Mercury keeps Unsorted and its small suggested buckets here automatically. {% endif %}Use “Add bucket” above, or <a href="{{ url_for('buckets.organize') }}">open Edit</a> to drag buckets in.</p>{% endcall %}
         {% else %}
         {% call empty("No conversations here yet", "crate") %}<p>{% if crate_filter %}{{ crate_filter.name }} has no indexed conversations yet.{% else %}The buckets in this crate have no indexed conversations yet.{% endif %}</p>{% endcall %}
         {% endif %}
@@ -318,6 +307,7 @@
     <h2 class="dialog-title" id="bulk-move-title">Move <span data-bulk-noun>conversations</span></h2>
     <label class="form-label" for="bulk-destination">Destination bucket</label>
     <select class="form-select" id="bulk-destination" data-bulk-destination>
+      <option value="{{ unsorted_value }}" data-href="{{ url_for('inbox.workspace', view='unsorted') }}">Unsorted</option>
       {% for bucket in buckets %}<option value="{{ bucket.id }}" data-href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) }}">{{ bucket.name }}</option>{% endfor %}
     </select>
     <ul class="consequences">

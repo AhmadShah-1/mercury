@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from mercury.accounts.models import GmailAccount
@@ -274,6 +274,33 @@ def bucket_sizes(user_id: uuid.UUID) -> dict[uuid.UUID, int]:
     )
 
 
+def unsorted_size(user_id: uuid.UUID) -> int:
+    """Count the owner's conversations in the virtual Unsorted bucket."""
+    from mercury.inbox.models import EmailThread
+
+    return (
+        db.session.scalar(
+            select(func.count(EmailThread.id))
+            .outerjoin(
+                BucketAssignment,
+                and_(
+                    BucketAssignment.thread_id == EmailThread.id,
+                    BucketAssignment.user_id == user_id,
+                ),
+            )
+            .outerjoin(
+                Bucket,
+                and_(Bucket.id == BucketAssignment.bucket_id, Bucket.user_id == user_id),
+            )
+            .where(
+                EmailThread.user_id == user_id,
+                or_(Bucket.id.is_(None), Bucket.archived.is_(True)),
+            )
+        )
+        or 0
+    )
+
+
 def file_small_buckets(account: GmailAccount) -> int:
     """File Mercury's small suggested buckets into Misc and graduate grown ones back out.
 
@@ -335,6 +362,8 @@ class Library:
     expanded_crate_id: uuid.UUID | None = None
     hidden_count: int = 0
     misc_threshold: int = MISC_MAX_MEMBERS
+    misc_crate: Crate | None = None
+    unsorted_count: int = 0
 
 
 def build_library(
@@ -344,6 +373,8 @@ def build_library(
     sizes: dict[uuid.UUID, int] | None = None,
     selected_bucket: Bucket | None = None,
     selected_crate: Crate | None = None,
+    selected_unsorted: bool = False,
+    unsorted_count: int = 0,
 ) -> Library:
     """Arrange the owner's crates and active buckets for display.
 
@@ -365,9 +396,12 @@ def build_library(
             members[crate.id].append(bucket)
             crate_of[bucket.id] = crate
     bucket_size = {bucket.id: sizes.get(bucket.id, 0) for bucket in buckets}
+    misc = next((crate for crate in crates if crate.is_misc), None)
     crate_size = {
         crate.id: sum(bucket_size[bucket.id] for bucket in members[crate.id]) for crate in crates
     }
+    if misc is not None:
+        crate_size[misc.id] += unsorted_count
     library = Library(
         crates=crates,
         buckets=buckets,
@@ -376,6 +410,8 @@ def build_library(
         loose=loose,
         bucket_size=bucket_size,
         crate_size=crate_size,
+        misc_crate=misc,
+        unsorted_count=unsorted_count,
     )
 
     favorite_crates = [crate for crate in crates if crate.favorite]
@@ -383,7 +419,7 @@ def build_library(
     library.nav_crates = (
         favorite_crates
         or sorted(
-            (crate for crate in crates if members[crate.id]),
+            (crate for crate in crates if crate_size[crate.id]),
             key=lambda crate: (-crate_size[crate.id], crate.name.casefold()),
         )[:NAV_FALLBACK_SIZE]
     )
@@ -396,7 +432,11 @@ def build_library(
         ]
     )
 
-    expanded = selected_crate or (crate_of.get(selected_bucket.id) if selected_bucket else None)
+    expanded = (
+        (misc if selected_unsorted else None)
+        or selected_crate
+        or (crate_of.get(selected_bucket.id) if selected_bucket else None)
+    )
     if expanded is not None:
         library.expanded_crate_id = expanded.id
         if all(crate.id != expanded.id for crate in library.nav_crates):

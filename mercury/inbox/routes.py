@@ -21,7 +21,7 @@ from mercury.accounts.forms import EmptyForm
 from mercury.buckets.crates import build_library, owned_crate
 from mercury.buckets.forms import ActionForm, MoveThreadForm
 from mercury.buckets.models import Bucket, BucketAssignment, Crate
-from mercury.buckets.service import active_buckets, move_thread
+from mercury.buckets.service import UNSORTED_VALUE, active_buckets, move_thread
 from mercury.extensions import db
 from mercury.inbox.models import EmailThread, MessageReference, ProcessingRun, ThreadAnalysis
 from mercury.inbox.reader import build_thread_view
@@ -41,8 +41,11 @@ bp = Blueprint("inbox", __name__)
 WORKSPACE_VIEWS = {
     "overview": "Overview",
     "attention": "Needs attention",
-    "all": "All indexed threads",
     "unsorted": "Unsorted",
+}
+WORKSPACE_NAV_VIEWS = {
+    "overview": "Overview",
+    "attention": "Needs attention",
 }
 SAFE_PROVIDER_CODES = {"provider_unavailable", "provider_rate_limited", "provider_timeout"}
 # A run that has not finished after this long stops live polling and asks for a manual refresh.
@@ -101,6 +104,7 @@ def _workspace_query(
     view: str = "overview",
     cursor: tuple[datetime, uuid.UUID] | None = None,
     crate_id: uuid.UUID | None = None,
+    include_unsorted: bool = False,
 ):
     """One page (plus one row to detect more) in newest-first keyset order.
 
@@ -141,7 +145,12 @@ def _workspace_query(
         )
     if crate_id:
         # A crate lists its active buckets' conversations together, as one list.
-        query = query.where(Bucket.crate_id == crate_id, Bucket.archived.is_(False))
+        in_crate = and_(Bucket.crate_id == crate_id, Bucket.archived.is_(False))
+        query = query.where(
+            or_(in_crate, Bucket.id.is_(None), Bucket.archived.is_(True))
+            if include_unsorted
+            else in_crate
+        )
     if bucket_id:
         query = query.where(Bucket.id == bucket_id, Bucket.user_id == current_user.id)
     elif view == "attention":
@@ -253,6 +262,10 @@ def _render_workspace(
                 sizes=counts["per_bucket"],
                 selected_bucket=selected_bucket,
                 selected_crate=selected_crate,
+                selected_unsorted=(
+                    view == "unsorted" and selected_bucket is None and selected_crate is None
+                ),
+                unsorted_count=counts["unsorted"],
             )
             if connected
             else None
@@ -265,11 +278,11 @@ def _render_workspace(
         view_label=view_label,
         split_from=_split_parent(selected_bucket),
         updates_since=int(datetime.now(UTC).timestamp()),
-        views=WORKSPACE_VIEWS,
+        views=WORKSPACE_NAV_VIEWS,
         counts=counts,
         latest_run=_latest_run(current_user.id) if connected else None,
-        sync_form=EmptyForm(),
         move_form=EmptyForm(),
+        unsorted_value=UNSORTED_VALUE,
     )
 
 
@@ -277,6 +290,8 @@ def _render_workspace(
 @login_required
 def workspace():
     view = request.args.get("view", "overview")
+    if view == "all":
+        view = "overview"
     if view not in WORKSPACE_VIEWS:
         view = "overview"
     cursor = _parse_cursor(request.args.get("before"))
@@ -326,7 +341,10 @@ def crate_workspace(crate_id):
     cursor = _parse_cursor(request.args.get("before"))
     return _render_workspace(
         rows=_workspace_query(
-            crate_filter.id if crate_filter else None, cursor=cursor, crate_id=crate.id
+            crate_filter.id if crate_filter else None,
+            cursor=cursor,
+            crate_id=crate.id,
+            include_unsorted=crate.is_misc and crate_filter is None,
         ),
         selected_crate=crate,
         crate_filter=crate_filter,
@@ -359,9 +377,13 @@ def thread_reader(thread_id):
     assignment, bucket = placement if placement else (None, None)
     buckets = active_buckets(current_user.id)
     move_form = MoveThreadForm()
-    move_form.bucket_id.choices = [(str(item.id), item.name) for item in buckets]
+    move_form.bucket_id.choices = [(UNSORTED_VALUE, "Unsorted")] + [
+        (str(item.id), item.name) for item in buckets
+    ]
     if bucket is not None and not bucket.archived:
         move_form.bucket_id.data = str(bucket.id)
+    else:
+        move_form.bucket_id.data = UNSORTED_VALUE
     reference = db.session.scalar(
         select(MessageReference)
         .where(
@@ -438,10 +460,12 @@ def thread_body(thread_id):
 def move(thread_id):
     form = MoveThreadForm()
     buckets = active_buckets(current_user.id)
-    form.bucket_id.choices = [(str(bucket.id), bucket.name) for bucket in buckets]
+    form.bucket_id.choices = [(UNSORTED_VALUE, "Unsorted")] + [
+        (str(bucket.id), bucket.name) for bucket in buckets
+    ]
     if not form.validate_on_submit():
         abort(400)
-    bucket_id = uuid.UUID(form.bucket_id.data)
+    bucket_id = None if form.bucket_id.data == UNSORTED_VALUE else uuid.UUID(form.bucket_id.data)
     try:
         move_thread(current_user.id, thread_id, bucket_id)
     except LookupError:
