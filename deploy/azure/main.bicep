@@ -463,9 +463,6 @@ resource migrationJob 'Microsoft.App/jobs@2025-01-01' = {
         {
           name: 'migrate'
           image: image
-          command: [
-            '/app/deploy/entrypoint.sh'
-          ]
           args: [
             '/bin/sh'
             '-c'
