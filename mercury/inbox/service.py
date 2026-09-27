@@ -110,7 +110,9 @@ def upsert_provider_thread(account: GmailAccount, provider_thread: ProviderThrea
     return content_changed
 
 
-def index_account(account: GmailAccount, run: ProcessingRun, *, limit: int) -> None:
+def index_account(
+    account: GmailAccount, run: ProcessingRun, *, limit: int, finalize: bool = True
+) -> None:
     if account.connection_state != "connected":
         raise ValueError("connection_needs_reauthorization")
     provider = mail_provider_for(account)
@@ -145,9 +147,9 @@ def index_account(account: GmailAccount, run: ProcessingRun, *, limit: int) -> N
     account.last_synced_at = datetime.now(UTC)
     account.last_history_id = provider.profile().history_id
     account.pending_sync = False
-    run.stage = "complete"
-    run.status = "succeeded"
-    run.finished_at = datetime.now(UTC)
+    run.stage = "complete" if finalize else "analyzing"
+    run.status = "succeeded" if finalize else "running"
+    run.finished_at = datetime.now(UTC) if finalize else None
     db.session.commit()
 
 
@@ -161,6 +163,27 @@ def create_run(user: User, account: GmailAccount, *, kind: str, limit: int) -> P
     db.session.add(run)
     db.session.commit()
     return run
+
+
+def active_run(account: GmailAccount) -> ProcessingRun | None:
+    """Return the account's newest pending or running run, locking the account row.
+
+    The row lock makes check-then-create atomic, so concurrent refreshes cannot both queue a
+    full import; callers commit (for example through ``create_run``) to release it.
+    """
+    db.session.execute(
+        select(GmailAccount.id).where(GmailAccount.id == account.id).with_for_update()
+    )
+    return db.session.scalar(
+        select(ProcessingRun)
+        .where(
+            ProcessingRun.gmail_account_id == account.id,
+            ProcessingRun.user_id == account.user_id,
+            ProcessingRun.status.in_(("pending", "running")),
+        )
+        .order_by(ProcessingRun.created_at.desc())
+        .limit(1)
+    )
 
 
 def owned_thread(user_id: uuid.UUID, thread_id: uuid.UUID) -> EmailThread | None:

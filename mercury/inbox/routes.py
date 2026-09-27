@@ -24,7 +24,13 @@ from mercury.buckets.service import active_buckets, move_thread
 from mercury.extensions import db
 from mercury.inbox.models import EmailThread, MessageReference, ProcessingRun, ThreadAnalysis
 from mercury.inbox.reader import build_thread_view
-from mercury.inbox.service import create_run, mail_provider_for, owned_run, owned_thread
+from mercury.inbox.service import (
+    active_run,
+    create_run,
+    mail_provider_for,
+    owned_run,
+    owned_thread,
+)
 from mercury.integrations.google.links import gmail_message_search_url, gmail_thread_url
 from mercury.integrations.types import ProviderUnavailable, ReauthorizationRequired
 
@@ -150,6 +156,14 @@ def _latest_run(user_id: uuid.UUID) -> ProcessingRun | None:
     )
 
 
+def _split_parent(bucket: Bucket | None) -> Bucket | None:
+    if bucket is None or bucket.split_from_id is None:
+        return None
+    return db.session.scalar(
+        select(Bucket).where(Bucket.id == bucket.split_from_id, Bucket.user_id == current_user.id)
+    )
+
+
 def _render_workspace(*, rows, selected_bucket=None, view: str = "overview"):
     buckets = active_buckets(current_user.id)
     return render_template(
@@ -159,6 +173,8 @@ def _render_workspace(*, rows, selected_bucket=None, view: str = "overview"):
         selected_bucket=selected_bucket,
         view=view,
         view_label=selected_bucket.name if selected_bucket else WORKSPACE_VIEWS[view],
+        split_from=_split_parent(selected_bucket),
+        updates_since=int(datetime.now(UTC).timestamp()),
         views=WORKSPACE_VIEWS,
         counts=_workspace_counts(current_user.id) if current_user.gmail_account else None,
         latest_run=_latest_run(current_user.id) if current_user.gmail_account else None,
@@ -344,22 +360,32 @@ def action(thread_id):
     return redirect(url_for("inbox.thread_reader", thread_id=thread_id))
 
 
-@bp.post("/app/sync")
-@login_required
-def sync():
+def _start_refresh(*, full: bool):
     form = EmptyForm()
     if not form.validate_on_submit():
         abort(400)
     account = current_user.gmail_account
     if account is None:
         return redirect(url_for("accounts.connect_page"))
+    # Runs for one account execute serially, so a second import would only queue behind the
+    # first and spend the same Gmail quota again.
+    existing = active_run(account)
+    if existing is not None:
+        db.session.commit()
+        flash("A refresh is already in progress.", "info")
+        return redirect(url_for("inbox.run_status", run_id=existing.id))
+    # Without a history checkpoint there is nothing to apply incrementally.
+    incremental = not full and bool(account.last_history_id)
     if current_app.config["MAIL_MODE"] == "gmail":
-        # This durable run owns the full manual refresh and is reconciled if enqueueing fails.
-        # Clear the catch-up flag so periodic reconciliation does not queue a duplicate import.
+        # This durable run owns the refresh and is reconciled if enqueueing fails. Clear the
+        # catch-up flag so periodic reconciliation does not queue a duplicate.
         account.pending_sync = False
         db.session.commit()
     run = create_run(
-        current_user, account, kind="manual", limit=current_app.config["INDEX_MAX_THREADS"]
+        current_user,
+        account,
+        kind="sync" if incremental else "manual",
+        limit=current_app.config["INDEX_MAX_THREADS"],
     )
     if current_app.config["MAIL_MODE"] == "fake":
         from mercury.inbox.service import index_account
@@ -369,10 +395,61 @@ def sync():
         if account.ai_consent:
             analyze_pending(current_user.id)
     else:
-        from mercury.jobs.tasks import enqueue_discovery
+        from mercury.jobs.tasks import enqueue_discovery, enqueue_sync
 
-        enqueue_discovery(current_app.extensions["mercury"]["queue"], account, run)
+        queue = current_app.extensions["mercury"]["queue"]
+        if incremental:
+            enqueue_sync(queue, account, run)
+        else:
+            enqueue_discovery(queue, account, run)
     return redirect(url_for("inbox.run_status", run_id=run.id))
+
+
+@bp.post("/app/sync")
+@login_required
+def sync():
+    """Fetch only what changed in Gmail; unchanged threads cost no quota and no AI."""
+    return _start_refresh(full=False)
+
+
+@bp.post("/app/sync/full")
+@login_required
+def full_rebuild():
+    """Development-only full re-index of the lookback window (re-lists every thread)."""
+    if current_app.config["APP_ENV"] == "production":
+        abort(404)
+    return _start_refresh(full=True)
+
+
+@bp.get("/app/updates")
+def updates():
+    """Tell an open workspace that new mail or re-organization arrived since it loaded.
+
+    Returns counts only, never content. An expired session gets HTTP 286, which tells htmx to
+    stop polling instead of swapping a login page into the banner.
+    """
+    if not current_user.is_authenticated:
+        return "", 286
+    try:
+        since = datetime.fromtimestamp(int(request.args.get("since", "")), UTC)
+    except (OverflowError, OSError, ValueError):
+        since = datetime.now(UTC)
+    account = current_user.gmail_account
+    new_threads = (
+        db.session.scalar(
+            select(func.count())
+            .select_from(EmailThread)
+            .where(EmailThread.user_id == current_user.id, EmailThread.latest_message_at > since)
+        )
+        or 0
+    )
+    organized = bool(account and account.last_organized_at and account.last_organized_at > since)
+    return render_template(
+        "inbox/_updates.html",
+        since=int(since.timestamp()),
+        new_threads=new_threads,
+        organized=organized,
+    )
 
 
 @bp.get("/app/runs/<uuid:run_id>")

@@ -140,7 +140,10 @@ def analyze_thread(thread: EmailThread, *, onboarding: bool = False) -> None:
 def analyze_pending(user_id, *, onboarding: bool = False) -> None:
     threads = db.session.scalars(
         select(EmailThread)
-        .where(EmailThread.user_id == user_id, EmailThread.processing_state == "pending")
+        .where(
+            EmailThread.user_id == user_id,
+            EmailThread.processing_state.in_(("pending", "budget_paused")),
+        )
         .order_by(EmailThread.latest_message_at.desc())
         .limit(100)
     ).all()

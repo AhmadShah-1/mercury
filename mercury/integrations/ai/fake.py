@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 
-from mercury.integrations.types import AnalysisResult
+from mercury.integrations.types import AnalysisResult, BucketSuggestion
 
 
 class FakeAIProvider:
@@ -45,3 +45,24 @@ class FakeAIProvider:
         vector = values[:512]
         norm = math.sqrt(sum(value * value for value in vector)) or 1.0
         return [value / norm for value in vector], max(1, len(text) // 4)
+
+    def suggest_bucket(self, *, descriptions: tuple[str, ...]) -> BucketSuggestion:
+        text = " ".join(descriptions).lower()
+        if any(word in text for word in ("invoice", "statement", "payment", "bank")):
+            name = "Financial Notices"
+            purpose = "Statements, invoices, and other fictional financial notices."
+        elif any(word in text for word in ("order", "purchase", "shipped", "delivery")):
+            name = "Orders and Deliveries"
+            purpose = "Purchase confirmations and fictional delivery updates."
+        elif any(word in text for word in ("project", "forecast", "review", "workshop")):
+            name = "Projects and Reviews"
+            purpose = "Project discussions, reviews, and follow-up requests."
+        else:
+            name = "Recurring Reading"
+            purpose = "Related informational conversations suggested from synthetic data."
+        return BucketSuggestion(
+            name=name,
+            purpose=purpose,
+            input_tokens=max(1, sum(len(item) for item in descriptions) // 4),
+            output_tokens=max(1, (len(name) + len(purpose)) // 4),
+        )

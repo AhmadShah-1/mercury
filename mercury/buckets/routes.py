@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from flask import Blueprint, abort, flash, redirect, render_template, url_for
+from flask import Blueprint, abort, current_app, flash, redirect, render_template, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import select
 
@@ -13,6 +13,7 @@ from mercury.buckets.service import (
     active_buckets,
     archive_bucket,
     create_bucket,
+    follow_ai_name,
     merge_buckets,
     merge_preview_count,
     owned_bucket,
@@ -50,6 +51,22 @@ def edit(bucket_id):
     return render_template("buckets/edit.html", form=form, title="Edit bucket", bucket=bucket)
 
 
+@bp.post("/app/buckets/<uuid:bucket_id>/follow-ai-name")
+@login_required
+def follow_ai(bucket_id):
+    form = EmptyForm()
+    if not form.validate_on_submit():
+        abort(400)
+    try:
+        follow_ai_name(current_user.id, bucket_id)
+    except LookupError:
+        abort(404)
+    except ValueError:
+        abort(409)
+    flash("This bucket now uses Mercury's name and will follow future updates.", "success")
+    return redirect(url_for("inbox.bucket_workspace", bucket_id=bucket_id))
+
+
 @bp.post("/app/buckets/<uuid:bucket_id>/archive")
 @login_required
 def archive(bucket_id):
@@ -75,9 +92,26 @@ def merge(bucket_id):
     form.destination_id.choices = choices
     affected = merge_preview_count(current_user.id, source.id)
     if form.validate_on_submit():
-        merge_buckets(current_user.id, source.id, uuid.UUID(form.destination_id.data))
+        destination_id = uuid.UUID(form.destination_id.data)
+        manual_ids = merge_buckets(current_user.id, source.id, destination_id)
+        account = current_user.gmail_account
+        if (
+            account
+            and current_app.config["GMAIL_LABEL_WRITES_ENABLED"]
+            and account.label_write_consent
+        ):
+            # Only manual moves carry Mercury labels in Gmail; relabel those that moved.
+            from mercury.jobs.tasks import enqueue_label
+
+            for thread_id in manual_ids:
+                enqueue_label(
+                    current_app.extensions["mercury"]["queue"],
+                    account,
+                    thread_id=thread_id,
+                    bucket_id=destination_id,
+                )
         flash(f"Merged {affected} thread assignments.", "success")
-        return redirect(url_for("inbox.workspace"))
+        return redirect(url_for("inbox.bucket_workspace", bucket_id=destination_id))
     return render_template("buckets/merge.html", form=form, source=source, affected=affected)
 
 

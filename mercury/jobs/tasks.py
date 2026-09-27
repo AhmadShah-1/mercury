@@ -30,6 +30,7 @@ from procrastinate.jobs import Status
 from sqlalchemy import or_, select
 
 from mercury.accounts.models import GmailAccount
+from mercury.buckets.organize import organize_account
 from mercury.buckets.service import seed_demo_buckets
 from mercury.extensions import db
 from mercury.inbox.models import ProcessingRun
@@ -143,11 +144,23 @@ def discover_recent_threads(
                 or run.status in {"succeeded", "failed"}
             ):
                 return
-            index_account(account, run, limit=run.requested_limit)
-            if account.ai_consent:
+            index_account(account, run, limit=run.requested_limit, finalize=False)
+            if account.ai_consent and app.config["AI_PROCESSING_ENABLED"]:
+                run.stage = "analyzing"
+                db.session.commit()
                 analyze_pending(account.user_id, onboarding=run.kind == "initial")
+                run = db.session.get(ProcessingRun, run.id)
+                run.stage = "discovering_buckets"
+                db.session.commit()
+                organize_account(account)
             if app.config["MAIL_MODE"] == "fake":
                 seed_demo_buckets(account)
+            run = db.session.get(ProcessingRun, run.id)
+            run.stage = "complete"
+            run.status = "succeeded"
+            run.safe_error_code = None
+            run.finished_at = datetime.now(UTC)
+            db.session.commit()
 
 
 def sync_account_history_task(
@@ -159,19 +172,43 @@ def sync_account_history_task(
 ) -> None:
     app = _app()
     with app.app_context(), track_run(run_id, context, MAIL_RETRY):
+        analyze = app.config["AI_PROCESSING_ENABLED"]
+        # With analysis to follow, the run stays open so progress polling does not stop early.
         sync_account_history(
             uuid.UUID(account_id),
             connection_generation,
             uuid.UUID(run_id) if run_id else None,
+            finalize=not analyze,
         )
-        account = db.session.get(GmailAccount, uuid.UUID(account_id))
-        if (
-            account
-            and account.ai_consent
-            and account.connection_generation == connection_generation
-            and account.connection_state == "connected"
-        ):
-            analyze_pending(account.user_id)
+        account_uuid = uuid.UUID(account_id)
+        with account_lock(account_uuid):
+            account = db.session.get(GmailAccount, account_uuid)
+            current = (
+                account is not None
+                and account.connection_generation == connection_generation
+                and account.connection_state == "connected"
+            )
+            run = db.session.get(ProcessingRun, uuid.UUID(run_id)) if run_id else None
+            if current and analyze and account.ai_consent:
+                if run:
+                    run.stage = "analyzing"
+                    run.status = "running"
+                    run.finished_at = None
+                    db.session.commit()
+                analyze_pending(account.user_id)
+                if run:
+                    run = db.session.get(ProcessingRun, run.id)
+                    run.stage = "discovering_buckets"
+                    db.session.commit()
+                organize_account(account)
+            if run and current:
+                run = db.session.get(ProcessingRun, run.id)
+                if run.status not in {"succeeded", "failed"}:
+                    run.stage = "complete"
+                    run.status = "succeeded"
+                    run.safe_error_code = None
+                    run.finished_at = datetime.now(UTC)
+                    db.session.commit()
 
 
 def apply_owned_label_task(
@@ -234,7 +271,11 @@ def reconcile(app: Flask) -> dict[str, int]:
     for run in pending:
         account = db.session.get(GmailAccount, run.gmail_account_id)
         if account and account.connection_state == "connected":
-            if enqueue_discovery(queue_app, account, run) is not None:
+            # Incremental runs resume as incremental work; only full runs re-list the mailbox.
+            if run.kind == "sync":
+                if enqueue_sync(queue_app, account, run) is not None:
+                    counts["sync"] += 1
+            elif enqueue_discovery(queue_app, account, run) is not None:
                 counts["discovery"] += 1
 
     due = [GmailAccount.pending_sync.is_(True)]

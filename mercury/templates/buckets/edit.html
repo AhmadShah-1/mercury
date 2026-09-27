@@ -9,7 +9,7 @@
       <span class="panel-icon">{{ icon("pencil" if bucket else "folder") }}</span>
       <div>
         <h1 class="panel-title">{{ title }}</h1>
-        <p class="panel-sub">{% if bucket %}Renaming keeps this bucket's identity and conversations. Mercury never renames a bucket you've named.{% else %}Create a destination, then move conversations into it — this is also how you split a bucket.{% endif %}</p>
+        <p class="panel-sub">{% if bucket %}Renaming keeps this bucket's identity and conversations. Mercury never renames a bucket you've named.{% else %}Create a destination, then move conversations into it. Once it has a few, Mercury also files similar new mail here.{% endif %}</p>
       </div>
     </div>
     <form class="form-stack" method="post" novalidate>
@@ -31,6 +31,31 @@
       </div>
     </form>
   </div>
+
+  {% if bucket and bucket.ai_name %}
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-icon">{{ icon("sparkle") }}</span>
+      <div>
+        <h2 class="panel-title">Mercury's name for this cluster</h2>
+        <p class="panel-sub">Mercury keeps this current as the bucket grows, splits, or merges, so you can see how its meaning develops. Only Mercury edits it.</p>
+      </div>
+    </div>
+    <dl class="meaning-facts">
+      <dt>Name</dt><dd>{{ bucket.ai_name }}</dd>
+      {% if bucket.ai_purpose %}<dt>Meaning</dt><dd>{{ bucket.ai_purpose }}</dd>{% endif %}
+      {% if bucket.ai_named_at %}<dt>Updated</dt><dd><time datetime="{{ bucket.ai_named_at.isoformat() }}">{{ bucket.ai_named_at|longdate }}</time></dd>{% endif %}
+    </dl>
+    {% if bucket.user_confirmed %}
+    <form method="post" action="{{ url_for('buckets.follow_ai', bucket_id=bucket.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-quiet" type="submit">{{ icon("sparkle", "icon-sm") }} Use Mercury's name and keep it updated</button>
+    </form>
+    {% else %}
+    <p class="muted-m">This bucket's name follows Mercury's. Saving your own name above keeps yours from then on.</p>
+    {% endif %}
+  </div>
+  {% endif %}
 
   {% if bucket %}
   <div class="panel">

@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+import pytest
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.pool import NullPool
 
 from mercury.accounts.models import GmailAccount
 from mercury.extensions import db
 from mercury.inbox.models import EmailThread, MessageReference, ThreadAnalysis
-from mercury.inbox.sync import sync_account_history
+from mercury.inbox.sync import account_lock, sync_account_history
 from mercury.integrations.fake_gmail import FakeGmailProvider
 from mercury.integrations.types import ProviderMessage
 
@@ -113,3 +115,81 @@ def test_stale_generation_job_returns_before_provider_call(app, connected, monke
         account = db.session.scalar(select(GmailAccount))
         sync_account_history(account.id, account.connection_generation - 1)
         assert provider.history_calls == []
+
+
+def _lock_is_free(app, key: str) -> bool:
+    """Probe the advisory lock from an independent session, then release any probe hold."""
+    engine = create_engine(app.config["SQLALCHEMY_DATABASE_URI"], poolclass=NullPool)
+    try:
+        with engine.connect() as probe:
+            acquired = probe.scalar(text("SELECT pg_try_advisory_lock(hashtext(:k))"), {"k": key})
+            if acquired:
+                probe.execute(text("SELECT pg_advisory_unlock(hashtext(:k))"), {"k": key})
+            return bool(acquired)
+    finally:
+        engine.dispose()
+
+
+def test_account_lock_survives_commits_and_is_released(app, connected):
+    with app.app_context():
+        account = db.session.scalar(select(GmailAccount))
+        key = str(account.id)
+        with account_lock(account.id):
+            db.session.commit()
+            # Hold the pooled connection the session just returned so the next ORM statement
+            # runs on another one; a lock taken through db.session would be stranded here.
+            stranded = db.engine.connect()
+            db.session.scalar(select(GmailAccount.id))
+            assert not _lock_is_free(app, key)
+        try:
+            assert _lock_is_free(app, key)
+        finally:
+            stranded.close()
+
+
+def test_account_lock_releases_after_failure(app, connected):
+    with app.app_context():
+        account = db.session.scalar(select(GmailAccount))
+        with pytest.raises(RuntimeError), account_lock(account.id):
+            raise RuntimeError("boom")
+        assert _lock_is_free(app, str(account.id))
+
+
+def test_sync_task_keeps_its_run_open_through_analysis_then_completes(app, connected, monkeypatch):
+    from types import SimpleNamespace
+
+    from mercury.inbox.models import ProcessingRun
+    from mercury.jobs import tasks as task_module
+
+    provider = HistoryProvider()
+    monkeypatch.setitem(app.extensions["mercury"], "mail_provider", lambda account: provider)
+    seen = []
+    analyze = task_module.analyze_pending
+
+    def spy(user_id, **kwargs):
+        # Progress polling stops at "succeeded", so the run must still be open here.
+        seen.append(db.session.get(ProcessingRun, run_id).status)
+        return analyze(user_id, **kwargs)
+
+    monkeypatch.setattr(task_module, "analyze_pending", spy)
+    with app.app_context():
+        account = db.session.scalar(select(GmailAccount))
+        run = ProcessingRun(
+            user_id=account.user_id, gmail_account_id=account.id, kind="sync", requested_limit=50
+        )
+        db.session.add(run)
+        db.session.commit()
+        run_id, account_id, generation = run.id, account.id, account.connection_generation
+
+    task_module.bind_flask_app(app)
+    task_module.sync_account_history_task(
+        SimpleNamespace(job=None),
+        account_id=str(account_id),
+        connection_generation=generation,
+        run_id=str(run_id),
+    )
+
+    with app.app_context():
+        run = db.session.get(ProcessingRun, run_id)
+        assert seen == ["running"]
+        assert (run.status, run.stage, run.found_count) == ("succeeded", "complete", 1)

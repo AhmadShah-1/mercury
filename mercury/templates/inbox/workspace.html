@@ -45,8 +45,8 @@
         {% if buckets %}
         <ul class="nav-list" role="list" aria-labelledby="buckets-heading">
           {% for bucket in buckets %}
-          <li><a class="nav-item" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) }}"{% if selected_bucket and selected_bucket.id == bucket.id %} aria-current="page"{% endif %}>
-            {{ icon("folder") }}<span class="nav-label">{{ bucket.name }}</span>{{ count(counts.per_bucket.get(bucket.id, 0), "conversations") }}
+          <li><a class="nav-item" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) }}"{% if bucket.shows_ai_name %} title="Mercury: {{ bucket.ai_name }}"{% endif %}{% if selected_bucket and selected_bucket.id == bucket.id %} aria-current="page"{% endif %}>
+            {{ icon("folder") }}<span class="nav-label">{{ bucket.name }}</span>{% if bucket.meaning_updated %}<span class="meaning-dot"><span class="visually-hidden">Meaning updated</span></span>{% endif %}{{ count(counts.per_bucket.get(bucket.id, 0), "conversations") }}
           </a></li>
           {% endfor %}
         </ul>
@@ -73,6 +73,12 @@
         {{ sync_form.hidden_tag() }}
         <button class="btn btn-quiet btn-sm w-100" type="submit" data-busy-label="Syncing…">{{ icon("refresh", "icon-sm") }} Sync now</button>
       </form>
+      {% if config.APP_ENV != "production" %}
+      <form method="post" action="{{ url_for('inbox.full_rebuild') }}" data-confirm="Re-lists every conversation in the lookback window, which uses Gmail quota. AI still runs only for conversations whose content changed." data-confirm-title="Run a full rebuild?" data-confirm-label="Rebuild">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-ghost btn-sm w-100" type="submit">{{ icon("database", "icon-sm") }} Full rebuild (dev)</button>
+      </form>
+      {% endif %}
       {% endif %}
     </div>
   </aside>
@@ -93,6 +99,24 @@
         </div>
       </div>
       {% if selected_bucket and selected_bucket.purpose %}<p class="list-purpose">{{ selected_bucket.purpose }}</p>{% endif %}
+      {% if selected_bucket and (selected_bucket.shows_ai_name or split_from) %}
+      <div class="list-meaning">
+        {% if selected_bucket.shows_ai_name %}
+        <details class="meaning">
+          <summary>{{ icon("sparkle", "icon-xs") }}<span class="meaning-label">Mercury:</span> {{ selected_bucket.ai_name }}{% if selected_bucket.meaning_updated %} {{ badge("Meaning updated", "new") }}{% endif %}</summary>
+          <div class="meaning-body">
+            {% if selected_bucket.ai_purpose %}<p>{{ selected_bucket.ai_purpose }}</p>{% endif %}
+            <p class="meaning-note">Mercury keeps this description current as the bucket grows, splits, or merges. Your name stays as you set it.</p>
+            <form method="post" action="{{ url_for('buckets.follow_ai', bucket_id=selected_bucket.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-quiet btn-sm" type="submit">{{ icon("sparkle", "icon-sm") }} Use Mercury's name</button>
+            </form>
+          </div>
+        </details>
+        {% endif %}
+        {% if split_from %}<p class="meaning-lineage">{{ icon("history", "icon-xs") }} Split from <a href="{{ url_for('inbox.bucket_workspace', bucket_id=split_from.id) }}">{{ split_from.name }}</a>{% if split_from.archived %} (archived){% endif %}</p>{% endif %}
+      </div>
+      {% endif %}
       {% if rows %}
       <div class="list-tools js-only">
         <label class="row-select select-all" title="Select all shown">
@@ -116,6 +140,7 @@
     </header>
 
     <div class="list-states">
+      {% with since=updates_since, new_threads=0, organized=False %}{% include "inbox/_updates.html" %}{% endwith %}
       {% if account.connection_state == "reconnect_required" %}
         {% call state("Gmail needs to be reconnected", "warning", "unplug", role="status") %}
           <p>Mercury's access expired or was revoked. You can keep browsing what's already indexed; new mail and original text need a fresh authorization.</p>

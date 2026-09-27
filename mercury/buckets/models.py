@@ -47,6 +47,36 @@ class Bucket(db.Model):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+    # Mercury's own reading of what the cluster means. Only the program writes these; `name`
+    # and `purpose` follow them until the user renames the bucket (`user_confirmed`).
+    ai_name: Mapped[str | None] = mapped_column(String(80))
+    ai_purpose: Mapped[str | None] = mapped_column(String(240))
+    ai_named_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    named_member_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    meaning_stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    renamed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Membership size at the last split check, so unchanged buckets are not re-clustered.
+    reviewed_member_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    split_from_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("buckets.id", ondelete="SET NULL")
+    )
+    # A user merge is a deliberate grouping; automatic splitting never undoes it.
+    merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    @property
+    def shows_ai_name(self) -> bool:
+        return bool(self.ai_name) and self.ai_name.casefold() != self.name.casefold()
+
+    @property
+    def meaning_updated(self) -> bool:
+        """Mercury's meaning changed after the user last chose this bucket's name."""
+        return bool(
+            self.shows_ai_name
+            and self.user_confirmed
+            and self.ai_named_at
+            and self.renamed_at
+            and self.ai_named_at > self.renamed_at
+        )
 
 
 class BucketAssignment(db.Model):

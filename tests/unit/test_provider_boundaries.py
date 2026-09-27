@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from mercury.integrations.ai.openai import OpenAIProvider
 from mercury.integrations.google.gmail import GmailProvider
-from mercury.intelligence.schemas import SummaryOutput
+from mercury.intelligence.schemas import BucketSuggestionOutput, SummaryOutput
 
 
 class _Responses:
@@ -14,8 +14,13 @@ class _Responses:
 
     def parse(self, **kwargs):
         self.kwargs = kwargs
-        return SimpleNamespace(
-            output_parsed=SummaryOutput(
+        if kwargs["text_format"] is BucketSuggestionOutput:
+            parsed = BucketSuggestionOutput(
+                name="Project Planning",
+                purpose="Planning discussions and related project decisions.",
+            )
+        else:
+            parsed = SummaryOutput(
                 summary="A bounded result.",
                 action_required=False,
                 action_type="none",
@@ -23,7 +28,9 @@ class _Responses:
                 due_date=None,
                 source_message_id="message-1",
                 uncertain=False,
-            ),
+            )
+        return SimpleNamespace(
+            output_parsed=parsed,
             usage=SimpleNamespace(input_tokens=12, output_tokens=4),
         )
 
@@ -61,6 +68,29 @@ def test_openai_adapter_uses_structured_responses_without_storage_or_tools():
     assert embeddings.kwargs["dimensions"] == 512
     assert embeddings.kwargs["model"] == "text-embedding-3-small"
     assert len(vector) == 512 and tokens == 9
+
+
+def test_openai_bucket_naming_is_bounded_structured_and_not_stored():
+    provider = OpenAIProvider(
+        api_key="fixture-key",
+        summary_model="gpt-4.1-mini-2025-04-14",
+        embedding_model="text-embedding-3-small",
+        dimensions=512,
+        timeout=5,
+    )
+    responses = _Responses()
+    provider.client = SimpleNamespace(responses=responses)
+
+    suggestion = provider.suggest_bucket(
+        descriptions=tuple(f"description {index}" for index in range(8))
+    )
+
+    assert suggestion.name == "Project Planning"
+    assert responses.kwargs["store"] is False
+    assert responses.kwargs["text_format"] is BucketSuggestionOutput
+    assert "description 4" in responses.kwargs["input"]
+    assert "description 5" not in responses.kwargs["input"]
+    assert "tools" not in responses.kwargs
 
 
 def test_gmail_adapter_exposes_no_forbidden_operations():

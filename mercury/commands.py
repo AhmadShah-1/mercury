@@ -57,6 +57,75 @@ def register_commands(app) -> None:
         db.session.commit()
         click.echo("User promoted; no mailbox-reading permission was granted.")
 
+    @app.cli.command("bucket-scores")
+    @click.argument("email")
+    def bucket_scores(email: str) -> None:
+        """Print similarity distributions for tuning the BUCKET_* thresholds (numbers only)."""
+        import numpy as np
+
+        from mercury.buckets.classification import (
+            MIN_BUCKET_EXAMPLES,
+            active_buckets_for,
+            load_thread_vectors,
+            members_by_bucket,
+        )
+        from mercury.buckets.clustering import fit_scores, neighbor_scores
+
+        if current_app.config["APP_ENV"] == "production":
+            raise click.ClickException("bucket-scores is a development tuning aid")
+        user = db.session.scalar(select(User).where(User.email == email.lower()))
+        account = user.gmail_account if user else None
+        if account is None:
+            raise click.ClickException("connected mailbox not found")
+        config = current_app.config
+        rows = load_thread_vectors(account)
+        active = active_buckets_for(account)
+        grouped = members_by_bucket(rows, active)
+
+        def spread(values) -> str:
+            if not values:
+                return "-"
+            return "/".join(f"{value:.2f}" for value in np.percentile(values, [10, 50, 90]))
+
+        click.echo(
+            f"match_min={config['BUCKET_MATCH_MIN']:.2f} margin={config['BUCKET_MATCH_MARGIN']:.2f}"
+            f" keep_min={config['BUCKET_KEEP_MIN']:.2f}"
+            f" split_max={config['BUCKET_SPLIT_MAX_SIMILARITY']:.2f}"
+        )
+        click.echo("bucket fit = mean similarity to nearest other members, p10/p50/p90")
+        for bucket_id, members in sorted(grouped.items(), key=lambda item: -len(item[1])):
+            fits = fit_scores([member.vector for member in members])
+            misfits = sum(
+                member.movable and score < config["BUCKET_KEEP_MIN"]
+                for member, score in zip(members, fits, strict=True)
+            )
+            click.echo(
+                f"  {active[bucket_id].name[:36]:36} n={len(members):4}"
+                f" fit={spread(fits)} below_keep={misfits}"
+            )
+        examples = {
+            bucket_id: [member.vector for member in members]
+            for bucket_id, members in grouped.items()
+            if len(members) >= MIN_BUCKET_EXAMPLES
+        }
+        unplaced = [row for row in rows if row.unplaced(active)]
+        if not examples or not unplaced:
+            click.echo(f"unplaced n={len(unplaced)} (nothing to compare)")
+            return
+        table = np.array(
+            [neighbor_scores([row.vector for row in unplaced], v) for v in examples.values()]
+        )
+        ranked = np.sort(table, axis=0)[::-1]
+        best = ranked[0]
+        margin = best - ranked[1] if len(ranked) > 1 else best + 1.0
+        placeable = int(
+            ((best >= config["BUCKET_MATCH_MIN"]) & (margin >= config["BUCKET_MATCH_MARGIN"])).sum()
+        )
+        click.echo(
+            f"unplaced n={len(unplaced)} best={spread(best.tolist())}"
+            f" margin={spread(margin.tolist())} would_place={placeable}"
+        )
+
     @app.cli.command("rotate-token-encryption")
     def rotate_token_encryption() -> None:
         cipher = current_app.extensions["mercury"]["token_cipher"]

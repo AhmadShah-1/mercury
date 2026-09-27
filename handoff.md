@@ -24,6 +24,7 @@ before changing code and preserve the user's scope exclusions.
 |---|---|---|---|
 | Lead (Claude, session 2) | Worker/demo/deploy validation, mocked tests, pins, gates | see slice A | **Complete** 2026-09-26 — released |
 | UI agent (Claude subagent) | Quicksilver UI/UX rework + Playwright flow | see slice B | **Complete** 2026-09-26 — released |
+| Codex | Real-mail bucket discovery, naming budget, paused-analysis recovery, truthful progress | see session 3 slice | **Complete** 2026-09-26 — verified offline |
 | Next agent | Live-provider smoke tests (needs credentials) or remaining items under "Highest-priority remaining work" | Claim before editing | Unclaimed |
 
 ## Current outcome
@@ -162,6 +163,46 @@ work (base template, components, vendor assets, pyproject/lock). Everything sinc
 - Disposable test DB `mercury_test_ui` is kept on the test server for concurrent agent runs;
   `mercury_ui_preview` was dropped.
 
+## Session 3 slice — automatic bucket discovery (Codex, verified 2026-09-26)
+
+- Added the previously missing real-mail organization stage. The worker now keeps a processing
+  run active through analysis and bounded bucket discovery instead of declaring success after
+  metadata indexing.
+- Added tenant-scoped discovery over only current, compatible provider/model/dimension/pipeline
+  vectors. PCA/HDBSCAN suggestions use deterministic central/diverse representatives; HDBSCAN
+  noise may use an exact-sender fallback only when at least four unassigned threads share that
+  sender. Existing manual/rule/model assignments are excluded, so user locks are never moved.
+- Added strict OpenAI structured output for a two-to-four-word bucket name and short purpose using
+  at most five persisted short descriptions. Calls use `store=False`, no tools, no raw bodies,
+  and a separate `bucket-naming` usage reservation against the operator-configured monetary caps.
+- Suggestions are bounded by `MAX_SUGGESTED_BUCKETS` (default 12), reviewable, and idempotent.
+  Uncertain/noise conversations remain Unsorted. `budget_paused` threads are now eligible for a
+  later bounded retry; the configured daily/monthly limits are still enforced.
+- Live database read-only check before rebuilding: the real account had 50 compatible OpenAI
+  vectors; conservative HDBSCAN yielded 50 noise points, while two exact-sender groups of four
+  qualified for fallback suggestions. Bucket naming itself remains unverified against live
+  OpenAI until the rebuilt worker runs a Sync.
+
+Files added/changed for this slice: new `mercury/buckets/discovery.py`, AI provider types/schemas/
+prompts/adapters, clustering representative selection, naming budget accounting, worker/indexing
+orchestration, progress partial, `.env.example`, Compose environment, and focused unit/integration/
+acceptance tests.
+
+Commands actually run and results:
+
+- `make lint` → passed (`ruff check`, 75 files format-clean).
+- `make test` → **94 passed, 1 skipped**; browser flow skipped because
+  `MERCURY_BROWSER_BASE_URL` was not set.
+- First direct pytest attempts failed before test execution because `APP_ENV` was absent, then
+  because the sandboxed process could not reach the disposable database. Re-running through the
+  approved `make test` path started pgvector, migrated both schemas, and produced the passing
+  result above.
+- Read-only clustering diagnostic through the running web container produced:
+  `compatible_vectors=50`, no HDBSCAN clusters, 50 noise points, exact-sender groups `[4, 4]`.
+- Rebuilt/restarted the Doppler-backed dev `web` and `worker` containers without removing the
+  database volume. `/health/ready` returned `{"status":"ok"}` and startup logs had no errors.
+  The user must click **Sync now** once to enqueue discovery with the new worker code.
+
 ## Live integrations still not verified
 
 Google OIDC/Gmail OAuth, the Gmail API adapter against real Google, Pub/Sub push signature
@@ -241,13 +282,9 @@ Items 1–8 from session 1 are done (slice A/B). Remaining:
    private DB connectivity. Add Log Analytics retention configuration if desired.
 4. Review the pinned `aquasecurity/trivy-action` commit before first CI use; decide whether to
    add `make browser-test` to CI (needs `playwright install --with-deps chromium`).
-5. **Wire automatic bucket discovery.** `buckets/clustering.py` (PCA + HDBSCAN,
-   `conservative_choice`) is unit-tested but no task calls it; real Gmail users start with
-   everything Unsorted. Add a `discover_buckets` worker task (bounded, one at a time) that
-   creates `origin="suggested"` buckets and model assignments without touching locked ones.
-6. **Revoke the Google OAuth token on disconnect/delete** (best effort, spec §22); currently only
+5. **Revoke the Google OAuth token on disconnect/delete** (best effort, spec §22); currently only
    the watch is stopped and the encrypted token is deleted locally.
-7. Consider a manual-sync cooldown for `POST /app/sync` in real Gmail mode (currently a full
+6. Consider a manual-sync cooldown for `POST /app/sync` in real Gmail mode (currently a full
    bounded re-index, coalesced per run) and an undo for bulk moves (currently count confirmation
    only).
 

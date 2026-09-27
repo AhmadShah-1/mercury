@@ -44,6 +44,15 @@ def load_config(
             raise ConfigError(f"{name} is outside its allowed range")
         return value
 
+    def similarity(name: str, default: float) -> float:
+        try:
+            value = float(text(name, str(default)))
+        except ValueError as exc:
+            raise ConfigError(f"{name} must be a number") from exc
+        if not 0.0 <= value <= 1.0:
+            raise ConfigError(f"{name} must be between 0 and 1")
+        return value
+
     def money(name: str, default: str = "") -> Decimal | None:
         raw = text(name, default)
         if not raw:
@@ -126,6 +135,17 @@ def load_config(
         "AI_ACCOUNT_MONTHLY_BUDGET_USD": money("AI_ACCOUNT_MONTHLY_BUDGET_USD", "3"),
         "AI_ACCOUNT_DAILY_THREAD_LIMIT": integer("AI_ACCOUNT_DAILY_THREAD_LIMIT", 100, 1, 1000),
         "AI_ONBOARDING_THREAD_LIMIT": integer("AI_ONBOARDING_THREAD_LIMIT", 500, 1, 2000),
+        "MAX_SUGGESTED_BUCKETS": integer("MAX_SUGGESTED_BUCKETS", 12, 1, 24),
+        "MAX_ACTIVE_BUCKETS": integer("MAX_ACTIVE_BUCKETS", 30, 1, 100),
+        # Cosine thresholds on the mean of a thread's nearest bucket members, measured on one
+        # 100-thread development mailbox (512-dimension text-embedding-3-small): at these
+        # values clear misfits leave and no unrelated mail is filed. Promotional mail sits
+        # around 0.55-0.62 against every bucket, so lower bars misfile it. Re-measure with
+        # `flask bucket-scores` on more data before treating them as product constants.
+        "BUCKET_MATCH_MIN": similarity("BUCKET_MATCH_MIN", 0.66),
+        "BUCKET_MATCH_MARGIN": similarity("BUCKET_MATCH_MARGIN", 0.05),
+        "BUCKET_KEEP_MIN": similarity("BUCKET_KEEP_MIN", 0.64),
+        "BUCKET_SPLIT_MAX_SIMILARITY": similarity("BUCKET_SPLIT_MAX_SIMILARITY", 0.75),
         "INDEX_MAX_THREADS": integer("INDEX_MAX_THREADS", 2000, 1, 5000),
         "INDEX_LOOKBACK_DAYS": integer("INDEX_LOOKBACK_DAYS", 180, 1, 365),
         "SUMMARY_LOOKBACK_DAYS": 30,
@@ -177,6 +197,9 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ConfigError("AI_PROVIDER is invalid")
     if config["SYNC_MODE"] not in {"manual", "poll", "push"}:
         raise ConfigError("SYNC_MODE is invalid")
+    if config["BUCKET_KEEP_MIN"] > config["BUCKET_MATCH_MIN"]:
+        # The keep floor sits below the admit bar so placements do not flip on small changes.
+        raise ConfigError("BUCKET_KEEP_MIN must not exceed BUCKET_MATCH_MIN")
     require("SECRET_KEY", "SQLALCHEMY_DATABASE_URI", "TOKEN_ENCRYPTION_KEYS")
     if len(config["SECRET_KEY"]) < 32:
         raise ConfigError("SECRET_KEY must contain at least 32 characters")

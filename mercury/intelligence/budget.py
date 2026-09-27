@@ -139,6 +139,62 @@ def reserve_analysis(
     return usage
 
 
+def reserve_bucket_naming(
+    *, user_id: uuid.UUID, estimated_input_tokens: int, estimated_output_tokens: int
+) -> AIUsage:
+    """Reserve a bounded naming call against monetary caps, not the thread-analysis quota."""
+    input_rate = _rate("AI_SUMMARY_INPUT_USD_PER_MILLION")
+    output_rate = _rate("AI_SUMMARY_OUTPUT_USD_PER_MILLION")
+    reserved = _cost(
+        estimated_input_tokens,
+        estimated_output_tokens,
+        0,
+        input_rate,
+        output_rate,
+        ZERO,
+    )
+    month = datetime.now(UTC).date().replace(day=1)
+    global_bucket = _locked_bucket(
+        user_id=None, subject_key="global", category="ai-monthly", window_start=month
+    )
+    account_bucket = _locked_bucket(
+        user_id=user_id,
+        subject_key=f"user:{user_id}",
+        category="ai-monthly",
+        window_start=month,
+    )
+    if (
+        global_bucket.spent_usd + global_bucket.reserved_usd + reserved
+        > current_app.config["AI_GLOBAL_MONTHLY_BUDGET_USD"]
+        or account_bucket.spent_usd + account_bucket.reserved_usd + reserved
+        > current_app.config["AI_ACCOUNT_MONTHLY_BUDGET_USD"]
+    ):
+        db.session.rollback()
+        raise BudgetExceeded("ai_budget_paused")
+
+    global_bucket.reserved_usd += reserved
+    global_bucket.operation_count += 1
+    account_bucket.reserved_usd += reserved
+    account_bucket.operation_count += 1
+    usage = AIUsage(
+        user_id=user_id,
+        thread_id=None,
+        category="bucket-naming",
+        model=current_app.config["SUMMARY_MODEL"],
+        input_tokens=estimated_input_tokens,
+        output_tokens=estimated_output_tokens,
+        embedding_tokens=0,
+        input_rate=input_rate,
+        output_rate=output_rate,
+        embedding_rate=ZERO,
+        reserved_usd=reserved,
+        status="reserved",
+    )
+    db.session.add(usage)
+    db.session.commit()
+    return usage
+
+
 def finish_reservation(
     usage_id: uuid.UUID,
     *,

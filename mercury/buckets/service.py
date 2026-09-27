@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unicodedata
 import uuid
+from datetime import UTC, datetime
 from email.utils import parseaddr
 
 from sqlalchemy import func, select, update
@@ -33,10 +34,29 @@ def create_bucket(
         gmail_account_id=account_id,
         name=clean,
         purpose=" ".join(purpose.split())[:240],
+        renamed_at=datetime.now(UTC),
     )
     db.session.add(bucket)
     db.session.commit()
     return bucket
+
+
+def unique_bucket_name(
+    account_id: uuid.UUID, proposed: str, *, exclude: uuid.UUID | None = None
+) -> str:
+    """Return ``proposed`` or a numbered variant unused by the account's other buckets."""
+    base = " ".join(proposed.split())[:80]
+    query = select(Bucket.name).where(Bucket.gmail_account_id == account_id)
+    if exclude is not None:
+        query = query.where(Bucket.id != exclude)
+    existing = {name.casefold() for name in db.session.scalars(query)}
+    if base.casefold() not in existing:
+        return base
+    for suffix in range(2, 100):
+        candidate = f"{base[:74].rstrip()} ({suffix})"
+        if candidate.casefold() not in existing:
+            return candidate
+    raise ValueError("bucket_name_exhausted")
 
 
 def owned_bucket(user_id: uuid.UUID, bucket_id: uuid.UUID) -> Bucket | None:
@@ -81,6 +101,20 @@ def rename_bucket(user_id: uuid.UUID, bucket_id: uuid.UUID, name: str, purpose: 
     bucket.name = clean
     bucket.purpose = " ".join(purpose.split())[:240]
     bucket.user_confirmed = True
+    bucket.renamed_at = datetime.now(UTC)
+    db.session.commit()
+
+
+def follow_ai_name(user_id: uuid.UUID, bucket_id: uuid.UUID) -> None:
+    """Adopt Mercury's meaning as the display name and keep following future updates."""
+    bucket = owned_bucket(user_id, bucket_id)
+    if bucket is None:
+        raise LookupError("bucket_not_found")
+    if not bucket.ai_name:
+        raise ValueError("bucket has no Mercury name yet")
+    bucket.name = unique_bucket_name(bucket.gmail_account_id, bucket.ai_name, exclude=bucket.id)
+    bucket.purpose = bucket.ai_purpose or ""
+    bucket.user_confirmed = False
     db.session.commit()
 
 
@@ -105,7 +139,15 @@ def merge_preview_count(user_id: uuid.UUID, source_id: uuid.UUID) -> int:
     )
 
 
-def merge_buckets(user_id: uuid.UUID, source_id: uuid.UUID, destination_id: uuid.UUID) -> None:
+def merge_buckets(
+    user_id: uuid.UUID, source_id: uuid.UUID, destination_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Move every placement and rule into the destination; return manually placed thread IDs.
+
+    Everything is keyed by bucket ID, so later renames never break the merge. The destination
+    is exempt from automatic splitting (the user chose this grouping), its meaning is queued
+    for a refresh, and future matches use the combined members as examples.
+    """
     source = owned_bucket(user_id, source_id)
     destination = owned_bucket(user_id, destination_id)
     if (
@@ -116,6 +158,15 @@ def merge_buckets(user_id: uuid.UUID, source_id: uuid.UUID, destination_id: uuid
         raise LookupError("bucket_not_found")
     if source.id == destination.id:
         raise ValueError("a bucket cannot be merged into itself")
+    manual_ids = list(
+        db.session.scalars(
+            select(BucketAssignment.thread_id).where(
+                BucketAssignment.user_id == user_id,
+                BucketAssignment.bucket_id == source.id,
+                BucketAssignment.locked_by_user.is_(True),
+            )
+        )
+    )
     db.session.execute(
         update(BucketAssignment)
         .where(BucketAssignment.user_id == user_id, BucketAssignment.bucket_id == source.id)
@@ -127,7 +178,10 @@ def merge_buckets(user_id: uuid.UUID, source_id: uuid.UUID, destination_id: uuid
         .values(bucket_id=destination.id)
     )
     source.archived = True
+    destination.merged_at = datetime.now(UTC)
+    destination.meaning_stale = True
     db.session.commit()
+    return manual_ids
 
 
 def normalize_sender(value: str) -> str:
@@ -227,6 +281,9 @@ def seed_demo_buckets(account: GmailAccount) -> None:
             purpose=purpose,
             origin="suggested",
             user_confirmed=False,
+            ai_name=name,
+            ai_purpose=purpose,
+            ai_named_at=datetime.now(UTC),
         )
         db.session.add(bucket)
         db.session.flush()

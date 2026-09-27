@@ -8,3 +8,15 @@ Gmail remains authoritative for messages, labels, conversation membership, and u
 
 The reader fetches a bounded provider thread, prefers plain text, converts HTML to text without external requests, discards attachments/binaries, renders through Jinja autoescaping, and sets `Cache-Control: no-store, private`.
 
+## Automatic organization
+
+After each analysis step the worker runs one organization pass per account, under the account lock ([`mercury/buckets/organize.py`](../mercury/buckets/organize.py)). It reuses stored embeddings, so the only AI calls are bucket naming, which is budgeted.
+
+1. **Prune.** A thread Mercury placed goes back to Unsorted when its similarity to its bucket's nearest other members falls below `BUCKET_KEEP_MIN`. A bucket where more than half the members miss is left alone, since that points to a miscalibrated threshold.
+2. **Split.** A bucket that has grown since its last check is re-clustered. A clearly separate topic (group centroids below `BUCKET_SPLIT_MAX_SIMILARITY`) becomes a new bucket recorded with `split_from_id`. The part holding the user's own placements keeps the original bucket. Buckets made by a user merge are never split. This is automatic by product decision, which goes beyond the spec's reviewable-suggestion default.
+3. **Classify.** Unplaced threads join the one bucket whose nearest members they match above `BUCKET_MATCH_MIN` and by at least `BUCKET_MATCH_MARGIN` over the runner-up. Otherwise they stay in Unsorted.
+4. **Discover.** Remaining unplaced threads are clustered into new suggestions. Only members that clear the match bar join; loose ones stay in Unsorted.
+5. **Name.** Each bucket has a user-facing `name`/`purpose` and Mercury's own `ai_name`/`ai_purpose`, which only the program writes. They are refreshed after a split, a merge, or substantial growth. The display name follows `ai_name` until the user renames the bucket.
+
+Manual moves and sender rules always take precedence: every write is guarded in SQL by `origin = 'model' AND NOT locked_by_user`, so a concurrent user move wins. Everything is keyed by bucket ID, so renames never break placements, merges, or rules.
+

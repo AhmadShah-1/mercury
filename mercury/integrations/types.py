@@ -80,9 +80,19 @@ class AnalysisResult:
     output_tokens: int = 0
 
 
+@dataclass(frozen=True)
+class BucketSuggestion:
+    name: str
+    purpose: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
 class AIProvider(Protocol):
     name: str
 
     def summarize(self, *, text: str, message_ids: tuple[str, ...]) -> AnalysisResult: ...
 
     def embed(self, text: str) -> tuple[list[float], int]: ...
+
+    def suggest_bucket(self, *, descriptions: tuple[str, ...]) -> BucketSuggestion: ...

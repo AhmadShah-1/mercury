@@ -8,7 +8,7 @@ from mercury.extensions import db
 from mercury.inbox.models import EmailThread
 from mercury.intelligence.budget import finish_reservation, reserve_analysis
 from mercury.intelligence.models import AIUsage, UsageBucket
-from mercury.intelligence.service import analyze_thread
+from mercury.intelligence.service import analyze_pending, analyze_thread
 
 
 def test_budget_exhaustion_pauses_new_analysis(app, connected, monkeypatch):
@@ -58,3 +58,15 @@ def test_reservation_records_operator_rates_and_reconciles_actual_usage(
         assert len(monthly) == 2
         assert all(item.reserved_usd == 0 for item in monthly)
         assert all(item.spent_usd > 0 for item in monthly)
+
+
+def test_pending_analysis_retries_threads_paused_by_an_earlier_budget(app, connected):
+    with app.app_context():
+        thread = db.session.scalar(select(EmailThread))
+        thread.processing_state = "budget_paused"
+        db.session.commit()
+
+        analyze_pending(thread.user_id)
+
+        db.session.refresh(thread)
+        assert thread.processing_state == "complete"

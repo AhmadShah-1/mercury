@@ -205,6 +205,14 @@ def test_progress_partial_polls_only_while_active_and_is_owner_checked(app, clie
 
     with app.app_context():
         run = db.session.get(ProcessingRun, run_id)
+        run.stage, run.found_count, run.completed_count = "discovering_buckets", 9, 9
+        db.session.commit()
+    organizing = client.get(f"/app/runs/{run_id}", headers=HX)
+    assert b'hx-trigger="every 2s"' in organizing.data
+    assert b"Preparing summaries and category suggestions" in organizing.data
+
+    with app.app_context():
+        run = db.session.get(ProcessingRun, run_id)
         run.safe_error_code = "provider_rate_limited"
         db.session.commit()
     paused = client.get(f"/app/runs/{run_id}", headers=HX)

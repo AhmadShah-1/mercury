@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from openai import OpenAI
 
-from mercury.integrations.types import AnalysisResult
-from mercury.intelligence.prompts import SUMMARY_INSTRUCTIONS
-from mercury.intelligence.schemas import SummaryOutput
+from mercury.integrations.types import AnalysisResult, BucketSuggestion
+from mercury.intelligence.prompts import BUCKET_NAMING_INSTRUCTIONS, SUMMARY_INSTRUCTIONS
+from mercury.intelligence.schemas import BucketSuggestionOutput, SummaryOutput
 
 
 class OpenAIProvider:
@@ -56,3 +56,26 @@ class OpenAIProvider:
         if len(vector) != self.dimensions:
             raise ValueError("invalid_embedding_dimensions")
         return vector, response.usage.total_tokens
+
+    def suggest_bucket(self, *, descriptions: tuple[str, ...]) -> BucketSuggestion:
+        bounded = descriptions[:5]
+        response_input = "\n\n".join(
+            f'<description index="{index}">\n{description[:900]}\n</description>'
+            for index, description in enumerate(bounded, start=1)
+        )
+        response = self.client.responses.parse(
+            model=self.summary_model,
+            instructions=BUCKET_NAMING_INSTRUCTIONS,
+            input=response_input,
+            text_format=BucketSuggestionOutput,
+            store=False,
+        )
+        parsed = response.output_parsed
+        if parsed is None:
+            raise ValueError("invalid_structured_output")
+        usage = response.usage
+        return BucketSuggestion(
+            **parsed.model_dump(mode="json"),
+            input_tokens=getattr(usage, "input_tokens", 0),
+            output_tokens=getattr(usage, "output_tokens", 0),
+        )

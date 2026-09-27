@@ -1,0 +1,12 @@
+{#- Live-update check for an open workspace. It polls quietly while nothing has changed, then
+    stops and offers a reload rather than reshuffling rows under the reader. Counts only. -#}
+{% from "components/ui.html" import state %}
+{% set changed = new_threads or organized %}
+<div id="live-updates"
+  {%- if not changed %} hx-get="{{ url_for('inbox.updates', since=since) }}" hx-trigger="every 30s" hx-swap="outerHTML"{% endif %}>
+  {% if changed %}
+    {% call state("Your mailbox changed", "info", "inbox", role="status", compact=True) %}
+      <p>{% if new_threads %}{{ new_threads }} new {{ "conversation" if new_threads == 1 else "conversations" }}{% if organized %} and updated buckets{% endif %}{% else %}Mercury updated your buckets{% endif %}. <a href="">Refresh</a></p>
+    {% endcall %}
+  {% endif %}
+</div>

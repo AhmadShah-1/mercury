@@ -771,6 +771,20 @@ hr { border-color: var(--border); opacity: 1; }
 .list-title { margin: 0; font-size: 1.28rem; font-weight: 740; letter-spacing: -0.02em; overflow-wrap: anywhere; }
 .list-head-actions { display: flex; flex: none; gap: 0.1rem; }
 .list-purpose { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.85rem; }
+.list-meaning { display: grid; gap: 0.25rem; margin: 0.35rem 0 0; font-size: 0.8rem; color: var(--muted); }
+.meaning > summary { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; cursor: pointer; list-style: none; }
+.meaning > summary::-webkit-details-marker { display: none; }
+.meaning > summary .icon { color: var(--accent); }
+.meaning > summary:hover, .meaning[open] > summary { color: var(--ink); }
+.meaning-label { font-weight: 600; }
+.meaning-body { display: grid; gap: 0.4rem; justify-items: start; margin: 0.4rem 0 0.2rem; padding: 0.6rem 0.75rem; background: var(--accent-softer); border-radius: 8px; }
+.meaning-body p { margin: 0; }
+.meaning-note { font-size: 0.76rem; }
+.meaning-lineage { display: flex; align-items: center; gap: 0.3rem; margin: 0; }
+.meaning-dot { flex: none; width: 7px; height: 7px; background: var(--accent); border-radius: 50%; }
+.meaning-facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0 0 1rem; font-size: 0.9rem; }
+.meaning-facts dt { color: var(--muted); font-weight: 500; }
+.meaning-facts dd { margin: 0; overflow-wrap: anywhere; }
 .list-tools { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.75rem; }
 .filter-field { position: relative; flex: 1; min-width: 0; }
 .filter-field > .icon { position: absolute; left: 0.65rem; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }

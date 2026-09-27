@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from functools import lru_cache
 
 from flask import current_app
 from googleapiclient.errors import HttpError
-from sqlalchemy import select, text
+from sqlalchemy import URL, Engine, create_engine, select, text
+from sqlalchemy.pool import NullPool
 
 from mercury.accounts.models import GmailAccount
 from mercury.extensions import db
@@ -15,18 +17,33 @@ from mercury.inbox.models import ProcessingRun
 from mercury.inbox.service import index_account, mail_provider_for, upsert_provider_thread
 
 
+@lru_cache(maxsize=4)
+def _lock_engine(url: URL) -> Engine:
+    # Unpooled: closing a lock connection must end its database session, which is what
+    # releases a session-level advisory lock, instead of parking it in the pool. Autocommit
+    # keeps the connection from idling inside a transaction for the length of a job.
+    return create_engine(
+        url, poolclass=NullPool, isolation_level="AUTOCOMMIT", connect_args={"connect_timeout": 5}
+    )
+
+
 @contextmanager
 def account_lock(account_id):
+    """Serialize one account's mailbox work across worker threads and processes.
+
+    Advisory locks belong to a database session, but ORM commits hand ``db.session``'s
+    connection back to the pool, so an unlock issued through it can reach a different session
+    and leak the lock. The lock therefore lives on its own connection for the whole block.
+    """
     key = str(account_id)
-    db.session.execute(text("SELECT pg_advisory_lock(hashtext(:key))"), {"key": key})
-    try:
-        yield
-    except Exception:
-        db.session.rollback()
-        raise
-    finally:
-        db.session.execute(text("SELECT pg_advisory_unlock(hashtext(:key))"), {"key": key})
-        db.session.commit()
+    with _lock_engine(db.engine.url).connect() as lock_connection:
+        lock_connection.execute(text("SELECT pg_advisory_lock(hashtext(:key))"), {"key": key})
+        try:
+            yield
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            raise
 
 
 def _history_thread_ids(page: dict) -> set[str]:
@@ -40,7 +57,13 @@ def _history_thread_ids(page: dict) -> set[str]:
     return found
 
 
-def sync_account_history(account_id, connection_generation: int, run_id=None) -> None:
+def sync_account_history(
+    account_id, connection_generation: int, run_id=None, *, finalize: bool = True
+) -> None:
+    """Apply Gmail history since the checkpoint; ``finalize=False`` leaves a supplied run open.
+
+    Runs this function creates itself (checkpoint recovery) are always finalized here.
+    """
     with account_lock(account_id):
         account = db.session.scalar(
             select(GmailAccount).where(GmailAccount.id == account_id).with_for_update()
@@ -55,6 +78,7 @@ def sync_account_history(account_id, connection_generation: int, run_id=None) ->
         provider = mail_provider_for(account)
         if not account.last_history_id:
             if run is None:
+                finalize = True
                 run = ProcessingRun(
                     user_id=account.user_id,
                     gmail_account_id=account.id,
@@ -63,7 +87,7 @@ def sync_account_history(account_id, connection_generation: int, run_id=None) ->
                 )
                 db.session.add(run)
                 db.session.commit()
-            index_account(account, run, limit=run.requested_limit)
+            index_account(account, run, limit=run.requested_limit, finalize=finalize)
             return
 
         page_token = None
@@ -87,9 +111,10 @@ def sync_account_history(account_id, connection_generation: int, run_id=None) ->
                 requested_limit=current_app.config["INDEX_MAX_THREADS"],
             )
             if run is None:
+                finalize = True
                 db.session.add(recovery)
                 db.session.commit()
-            index_account(account, recovery, limit=recovery.requested_limit)
+            index_account(account, recovery, limit=recovery.requested_limit, finalize=finalize)
             return
 
         if len(changed_ids) > current_app.config["INDEX_MAX_THREADS"]:
@@ -121,8 +146,10 @@ def sync_account_history(account_id, connection_generation: int, run_id=None) ->
         account.last_history_id = newest_history_id
         account.pending_sync = False
         account.last_synced_at = datetime.now(UTC)
-        if run:
+        if run and finalize:
             run.stage = "complete"
             run.status = "succeeded"
             run.finished_at = datetime.now(UTC)
+        elif run:
+            run.stage = "analyzing"
         db.session.commit()

@@ -27,7 +27,7 @@ from mercury.integrations.types import (
 from mercury.jobs import tasks as task_module
 from mercury.jobs.queue import create_queue_app
 from mercury.jobs.tasks import MAIL_ATTEMPTS, bind_flask_app, enqueue_discovery, reconcile
-from tests.conftest import TEST_DATABASE_URL
+from tests.conftest import TEST_DATABASE_URL, csrf_token
 
 
 def _new_run(account: GmailAccount, *, status: str = "pending", age=timedelta(0)):
@@ -366,3 +366,77 @@ def test_multiple_queue_apps_keep_stable_task_names(app):
         "mercury:retry_stalled_jobs",
         "mercury:renew_gmail_watches",
     }
+
+
+def test_manual_refresh_reuses_active_run_instead_of_queueing_another(
+    app, client, connected, monkeypatch
+):
+    monkeypatch.setitem(app.config, "MAIL_MODE", "gmail")
+    token = csrf_token(client.get("/app"))
+    with app.app_context():
+        account = db.session.scalar(select(GmailAccount))
+        existing = _new_run(account, status="running")
+        existing_id = existing.id
+
+    response = client.post("/app/sync", data={"csrf_token": token}, follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/app/runs/{existing_id}")
+    with app.app_context():
+        active = db.session.scalars(
+            select(ProcessingRun).where(ProcessingRun.status.in_(("pending", "running")))
+        ).all()
+        assert [run.id for run in active] == [existing_id]
+        assert _jobs("mercury:discover_recent_threads") == []
+
+
+def test_manual_refresh_queues_a_new_run_once_the_previous_one_finished(
+    app, client, connected, monkeypatch
+):
+    monkeypatch.setitem(app.config, "MAIL_MODE", "gmail")
+    token = csrf_token(client.get("/app"))
+    with app.app_context():
+        account = db.session.scalar(select(GmailAccount))
+        _new_run(account, status="failed")
+
+    response = client.post("/app/sync", data={"csrf_token": token}, follow_redirects=False)
+
+    assert response.status_code == 302
+    with app.app_context():
+        # The fixture mailbox has a history checkpoint, so Sync applies only what changed.
+        assert _jobs("mercury:discover_recent_threads") == []
+        [job] = _jobs("mercury:sync_account_history")
+        run = db.session.scalar(select(ProcessingRun).where(ProcessingRun.kind == "sync"))
+        assert job.status == "todo"
+        assert job.args["run_id"] == str(run.id)
+
+
+def test_full_rebuild_relists_the_mailbox_and_is_hidden_in_production(
+    app, client, connected, monkeypatch
+):
+    monkeypatch.setitem(app.config, "MAIL_MODE", "gmail")
+    token = csrf_token(client.get("/app"))
+
+    response = client.post("/app/sync/full", data={"csrf_token": token}, follow_redirects=False)
+
+    assert response.status_code == 302
+    with app.app_context():
+        [job] = _jobs("mercury:discover_recent_threads")
+        assert job.status == "todo"
+        assert _jobs("mercury:sync_account_history") == []
+    monkeypatch.setitem(app.config, "APP_ENV", "production")
+    assert client.post("/app/sync/full", data={"csrf_token": token}).status_code == 404
+
+
+def test_reconcile_resumes_incremental_runs_incrementally(app, connected):
+    with app.app_context():
+        account = db.session.scalar(select(GmailAccount))
+        run = _new_run(account)
+        run.kind = "sync"
+        db.session.commit()
+
+        counts = reconcile(app)
+
+        assert (counts["sync"], counts["discovery"]) == (1, 0)
+        [job] = _jobs("mercury:sync_account_history")
+        assert job.args["run_id"] == str(run.id)

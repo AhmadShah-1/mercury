@@ -63,6 +63,8 @@ class GmailAccount(db.Model):
     pending_sync: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     watch_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Last time automatic organization changed a placement or bucket; drives live refresh hints.
+    last_organized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ai_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     label_write_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     disclosure_version: Mapped[str | None] = mapped_column(String(32))

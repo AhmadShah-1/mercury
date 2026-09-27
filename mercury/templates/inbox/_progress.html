@@ -4,10 +4,12 @@
 {% from "components/ui.html" import state %}
 {% set failed = run.status == "failed" or run.safe_error_code %}
 {% set done = run.status == "succeeded" %}
-{% set indexing = run.stage in ["indexing", "synchronizing"] or done %}
-{% set found_step = "done" if (indexing or run.found_count) else ("failed" if failed else "active") %}
-{% set index_step = "done" if done else ("failed" if failed and found_step == "done" else ("active" if indexing else "todo")) %}
-{% set prepare_step = "active" if done else "todo" %}
+{% set indexing = run.stage in ["indexing", "synchronizing"] %}
+{% set organizing = run.stage in ["analyzing", "discovering_buckets"] %}
+{% set indexed = organizing or done %}
+{% set found_step = "done" if (indexing or indexed or run.found_count) else ("failed" if failed else "active") %}
+{% set index_step = "done" if indexed else ("failed" if failed and found_step == "done" else ("active" if indexing else "todo")) %}
+{% set prepare_step = "done" if done else ("failed" if failed and index_step == "done" else ("active" if organizing else "todo")) %}
 <div class="progress-panel" id="run-progress" data-run-status="{{ run.status }}"
   {%- if polling %} hx-get="{{ url_for('inbox.run_status', run_id=run.id) }}" hx-trigger="every {{ '10s' if slow else '2s' }}" hx-swap="outerHTML"{% endif %}>
   <ol class="stepper" role="list">
@@ -33,12 +35,12 @@
       <span class="visually-hidden">{{ {"done": "Complete", "active": "In progress", "failed": "Stopped", "todo": "Not started"}[index_step] }}</span>
     </li>
     <li class="step step-{{ prepare_step }}">
-      <span class="step-dot">{% if prepare_step == "active" %}{{ icon("sparkle", "icon-sm") }}{% endif %}</span>
+      <span class="step-dot">{% if prepare_step == "done" %}{{ icon("check", "icon-sm") }}{% elif prepare_step == "failed" %}{{ icon("x", "icon-sm") }}{% elif prepare_step == "active" %}{{ icon("sparkle", "icon-sm") }}{% endif %}</span>
       <div class="step-body">
-        <p class="step-title">Preparing category suggestions</p>
-        <p class="step-sub">{% if done %}Suggestions and summaries continue in the background. You can start browsing now.{% else %}Starts once indexing finishes.{% endif %}</p>
+        <p class="step-title">{% if done %}Finished mailbox organization{% else %}Preparing summaries and category suggestions{% endif %}</p>
+        <p class="step-sub">{% if done %}Available suggestions are ready; uncertain or budget-limited conversations remain Unsorted.{% elif organizing %}Analyzing within your configured budget; uncertain conversations will remain Unsorted.{% else %}Starts once indexing finishes.{% endif %}</p>
       </div>
-      <span class="visually-hidden">{{ "In progress" if prepare_step == "active" else "Not started" }}</span>
+      <span class="visually-hidden">{{ {"done": "Complete", "active": "In progress", "failed": "Stopped", "todo": "Not started"}[prepare_step] }}</span>
     </li>
   </ol>
 
