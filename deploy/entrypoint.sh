@@ -7,7 +7,8 @@ if [ "${APP_ENV:-}" = "production" ] && [ "${MERCURY_DOPPLER_INJECTED:-}" != "1"
     exit 1
   fi
   export MERCURY_DOPPLER_INJECTED=1
-  exec doppler run --no-fallback -- "$0" "$@"
+  # The runtime user has no home directory, so the CLI's config lives in the container's /tmp.
+  exec doppler run --config-dir /tmp/doppler --no-check-version --no-fallback -- "$0" "$@"
 fi
 
 exec "$@"
