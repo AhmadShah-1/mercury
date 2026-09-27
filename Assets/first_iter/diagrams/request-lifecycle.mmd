@@ -1,0 +1,10 @@
+flowchart TB
+  R["HTTP request<br/>e.g. POST /app/threads/&lt;id&gt;/move"] --> MW["Before-request checks<br/>trusted Host, session generation,<br/>CSRF token (Flask-WTF)"]
+  MW --> ROUTE["Route (routes.py)<br/>parse form, @login_required,<br/>call service"]
+  ROUTE --> SVC["Service (service.py)<br/>ownership check + business rule<br/>+ transaction"]
+  SVC --> MODEL["Models (models.py)<br/>SQLAlchemy rows in PostgreSQL"]
+  SVC --> INT["Integrations<br/>Gmail / OpenAI adapters<br/>(only place that talks to providers)"]
+  SVC --> Q["Queue adapter (jobs/tasks.py)<br/>enqueue_* with IDs only"]
+  ROUTE --> TPL["Template (templates/*.html)<br/>autoescaped HTML or HTMX partial"]
+  TPL --> H["Security headers<br/>CSP, no-store, nosniff"]
+  H --> RESP["HTTP response"]

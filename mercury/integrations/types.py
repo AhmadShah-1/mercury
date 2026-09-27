@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -48,10 +49,18 @@ class ProviderThread:
     snippet: str = ""
 
 
+@dataclass(frozen=True)
+class ThreadDiscovery:
+    """A bounded thread stream plus the provider's best available total."""
+
+    estimated_count: int
+    threads: Iterable[ProviderThread]
+
+
 class MailProvider(Protocol):
     def profile(self) -> MailProfile: ...
 
-    def list_threads(self, *, limit: int, after_epoch: int) -> list[ProviderThread]: ...
+    def list_threads(self, *, limit: int, after_epoch: int) -> ThreadDiscovery: ...
 
     def get_thread(self, thread_id: str) -> ProviderThread: ...
 

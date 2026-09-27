@@ -1,0 +1,24 @@
+sequenceDiagram
+  autonumber
+  participant GM as Gmail
+  participant PS as Google Pub/Sub
+  participant W as Flask web
+  participant DB as PostgreSQL
+  participant Q as Queue
+  participant K as Worker
+
+  GM->>PS: mailbox changed (email, historyId)
+  PS->>W: POST /webhooks/google/pubsub + signed OIDC token
+  W->>W: verify JWT signature, issuer, audience, service account, subscription
+  W->>DB: account.pending_sync = true (durable)
+  W->>Q: enqueue sync_account_history (coalesced)
+  W-->>PS: 202 accepted (only after the DB commit)
+  K->>Q: claim sync job
+  K->>GM: history.list from last_history_id (all pages)
+  alt checkpoint expired (404)
+    K->>K: bounded re-index, fresh checkpoint
+  else normal
+    K->>DB: update changed threads - label-only changes do not re-run AI
+    K->>DB: advance last_history_id, pending_sync = false
+  end
+  Note over K,DB: Every 5 min reconcile_pending_work re-enqueues anything pending (covers missed pushes and failed enqueues)

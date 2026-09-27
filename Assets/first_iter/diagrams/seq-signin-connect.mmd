@@ -1,0 +1,33 @@
+sequenceDiagram
+  autonumber
+  actor U as User (browser)
+  participant W as Flask web
+  participant DB as PostgreSQL
+  participant G as Google OAuth
+  participant Q as Queue (procrastinate_jobs)
+
+  U->>W: POST /auth/google/start (CSRF token)
+  W->>DB: save OAuthAttempt (state digest, nonce, encrypted PKCE verifier, expiry)
+  W-->>U: 302 redirect to Google (scopes: openid email profile)
+  U->>G: Sign in and approve
+  G-->>U: 302 back to /auth/google/callback?code&state
+  U->>W: GET /auth/google/callback
+  W->>DB: consume OAuthAttempt once (reject replay/expired)
+  W->>G: exchange code (PKCE) and verify ID token (issuer, audience, nonce)
+  W->>DB: find or create User by google_subject
+  W-->>U: new session cookie, redirect to /auth/gmail/connect
+
+  Note over U,W: Connect page shows what Mercury reads, stores, and sends to AI
+  U->>W: POST /auth/gmail/start (accept disclosure, optional AI consent, CSRF)
+  W->>DB: save new OAuthAttempt (purpose = gmail)
+  W-->>U: 302 to Google (scope: gmail.readonly, offline access)
+  U->>G: Grant Gmail read access
+  G-->>U: 302 to /auth/gmail/callback
+  U->>W: GET /auth/gmail/callback
+  W->>G: exchange code, check same Google subject + granted scopes
+  W->>DB: GmailAccount with Fernet-encrypted token bundle
+  W->>DB: ProcessingRun (kind = initial, status = pending)
+  W->>Q: enqueue discover_recent_threads(account_id, generation, run_id)
+  W-->>U: 302 to /app/runs/<run_id> (live progress page)
+
+  Note over U,W: Synthetic demo mode skips Google: dev login plus a fake mailbox indexed immediately

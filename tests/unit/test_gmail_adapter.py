@@ -8,6 +8,7 @@ All token strings are invented fixtures.
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import httplib2
 import pytest
@@ -128,8 +129,8 @@ class _Request:
         raise self.error
 
 
-def _http_error(status, **headers):
-    return HttpError(httplib2.Response({"status": str(status), **headers}), b"provider body")
+def _http_error(status, *, content=b"provider body", **headers):
+    return HttpError(httplib2.Response({"status": str(status), **headers}), content)
 
 
 @pytest.mark.parametrize(
@@ -154,3 +155,80 @@ def test_execute_translates_provider_errors_to_safe_types(error, expected, code)
 def test_history_404_is_left_for_checkpoint_recovery():
     with pytest.raises(HttpError):
         GmailProvider._execute(_Request(_http_error(404)), translate_not_found=False)
+
+
+def test_execute_translates_google_403_rate_limit_to_bounded_retry():
+    error = _http_error(
+        403,
+        content=(
+            b'{"error":{"errors":[{"domain":"usageLimits",'
+            b'"reason":"rateLimitExceeded","message":"quota body"}]}}'
+        ),
+    )
+
+    with pytest.raises(ProviderUnavailable) as caught:
+        GmailProvider._execute(_Request(error))
+
+    assert str(caught.value) == "provider_rate_limited"
+    assert caught.value.retry_after == 60
+    assert "quota body" not in str(caught.value)
+
+
+def test_execute_does_not_retry_unrelated_403():
+    error = _http_error(
+        403,
+        content=b'{"error":{"errors":[{"reason":"domainPolicy"}]}}',
+    )
+
+    with pytest.raises(HttpError):
+        GmailProvider._execute(_Request(error))
+
+
+def test_discovery_stops_at_limit_without_requesting_a_zero_sized_page():
+    list_calls = []
+
+    class StaticRequest:
+        def __init__(self, response):
+            self.response = response
+
+        def execute(self, num_retries=0):
+            return self.response
+
+    class Threads:
+        def list(self, **kwargs):
+            list_calls.append(kwargs)
+            return StaticRequest(
+                {
+                    "threads": [{"id": "thread-1"}],
+                    "resultSizeEstimate": 2,
+                    "nextPageToken": "must-not-be-used",
+                }
+            )
+
+        def get(self, **kwargs):
+            return StaticRequest(
+                {
+                    "id": kwargs["id"],
+                    "messages": [
+                        {
+                            "id": "message-1",
+                            "internalDate": "0",
+                            "labelIds": [],
+                            "payload": {"headers": []},
+                        }
+                    ],
+                }
+            )
+
+    threads = Threads()
+    provider = object.__new__(GmailProvider)
+    provider.credentials = SimpleNamespace(valid=True)
+    provider.service = SimpleNamespace(users=lambda: SimpleNamespace(threads=lambda: threads))
+    provider._discovery_quota_ready_at = time.monotonic()
+    provider._pace_discovery = lambda _units: None
+
+    discovery = provider.list_threads(limit=1, after_epoch=0)
+
+    assert len(list(discovery.threads)) == 1
+    assert len(list_calls) == 1
+    assert list_calls[0]["maxResults"] == 1

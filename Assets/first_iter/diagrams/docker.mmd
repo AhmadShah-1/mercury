@@ -1,0 +1,23 @@
+flowchart TB
+  subgraph Build["docker build -f deploy/Dockerfile  (multi-stage)"]
+    B1["Stage 1: builder<br/>python:3.12 slim (pinned digest)<br/>poetry install --only main<br/>fetch + verify Bootstrap/HTMX"]
+    B2["Stage 2: doppler<br/>dopplerhq/cli (pinned digest)"]
+    B3["Stage 3: runtime<br/>python:3.12 slim + .venv + app code<br/>non-root user 'mercury'<br/>ENTRYPOINT entrypoint.sh"]
+    B1 -- "copy .venv + vendor assets" --> B3
+    B2 -- "copy doppler binary" --> B3
+  end
+  IMG[["Image: mercury:local"]]
+  B3 --> IMG
+
+  subgraph Compose["docker compose -f deploy/compose.yaml"]
+    WEB["web container<br/>CMD gunicorn wsgi:app<br/>127.0.0.1:5000 → 8000<br/>healthcheck /health/ready"]
+    WORK["worker container<br/>python -m mercury.jobs.worker"]
+    DBC["db container<br/>pgvector/pgvector:pg17<br/>127.0.0.1:5433 → 5432"]
+    VOL[("volume mercury_pgdata<br/>survives make down")]
+    TDB["test-db container (profile: test)<br/>127.0.0.1:55433, tmpfs = throwaway"]
+  end
+  IMG --> WEB
+  IMG --> WORK
+  DBC --- VOL
+  WEB -- "hostname db:5432" --> DBC
+  WORK -- "hostname db:5432" --> DBC

@@ -1,0 +1,33 @@
+sequenceDiagram
+  autonumber
+  participant Q as Queue (procrastinate_jobs)
+  participant K as Worker
+  participant DB as PostgreSQL
+  participant GM as Gmail API
+  participant AI as OpenAI
+
+  K->>Q: claim next job (lock = account:<id>)
+  Q-->>K: discover_recent_threads(account_id, generation, run_id)
+  K->>DB: load account + run - generation still current?
+  alt stale generation (user disconnected)
+    K-->>Q: finish without doing anything
+  else current
+    K->>GM: threads.list (last 180 days, max 2,000, no spam/trash/drafts)
+    K->>DB: run.stage = indexing, found_count = N
+    loop each thread (metadata only)
+      K->>GM: threads.get format=metadata
+      K->>DB: upsert EmailThread + MessageReferences, apply sender rule, completed_count += 1
+    end
+    K->>GM: getProfile (history checkpoint)
+    K->>DB: last_history_id, run succeeded
+    opt user gave AI consent
+      loop recent pending threads
+        K->>DB: reserve AI budget atomically (UsageBucket + AIUsage)
+        K->>GM: threads.get format=full (body stays in memory only)
+        K->>AI: summarize (structured output, store=False, no tools)
+        K->>AI: embed (text-embedding-3-small, 512 dims)
+        K->>DB: ThreadAnalysis + ThreadEmbedding if versions still match, settle budget
+      end
+    end
+  end
+  Note over K,Q: Transient error: retry with backoff. Permanent error: run failed with a safe code.

@@ -116,22 +116,32 @@ def index_account(account: GmailAccount, run: ProcessingRun, *, limit: int) -> N
     provider = mail_provider_for(account)
     generation = account.connection_generation
     cutoff = int(time.time()) - current_app.config["INDEX_LOOKBACK_DAYS"] * 86400
-    threads = provider.list_threads(limit=limit, after_epoch=cutoff)
+    run.stage = "discovering"
+    run.status = "running"
+    run.safe_error_code = None
+    run.found_count = 0
+    run.completed_count = 0
+    db.session.commit()
+
+    discovery = provider.list_threads(limit=limit, after_epoch=cutoff)
     db.session.refresh(account)
     if account.connection_generation != generation or account.connection_state != "connected":
         return
     run.stage = "indexing"
-    run.status = "running"
-    run.found_count = len(threads)
+    run.found_count = discovery.estimated_count
     db.session.commit()
 
-    for provider_thread in threads:
+    for provider_thread in discovery.threads:
         db.session.refresh(account)
         if account.connection_generation != generation or account.connection_state != "connected":
             return
         upsert_provider_thread(account, provider_thread)
         run.completed_count += 1
+        if run.completed_count > run.found_count:
+            run.found_count = run.completed_count
         db.session.commit()
+    # Providers may return only an estimate and messages can disappear during discovery.
+    run.found_count = run.completed_count
     account.last_synced_at = datetime.now(UTC)
     account.last_history_id = provider.profile().history_id
     account.pending_sync = False

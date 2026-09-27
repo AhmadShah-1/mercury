@@ -8,6 +8,13 @@ from flask import Flask, g, request
 
 
 def init_security_headers(app: Flask) -> None:
+    form_action = "'self'"
+    if app.config["AUTH_MODE"] == "google":
+        # OAuth starts with a same-origin CSRF-protected POST whose redirect is
+        # still treated as a form submission by browsers. Permit only Google's
+        # authorization origin so that redirect can leave Mercury.
+        form_action += " https://accounts.google.com"
+
     @app.before_request
     def assign_request_id() -> None:
         g.request_id = uuid.uuid4().hex
@@ -21,7 +28,7 @@ def init_security_headers(app: Flask) -> None:
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; "
-            "form-action 'self'; img-src 'self' data:; object-src 'none'; "
+            f"form-action {form_action}; img-src 'self' data:; object-src 'none'; "
             "script-src 'self'; style-src 'self'; connect-src 'self'"
         )
         if request.path.startswith(("/app", "/settings", "/admin")):

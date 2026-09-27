@@ -353,6 +353,11 @@ def sync():
     account = current_user.gmail_account
     if account is None:
         return redirect(url_for("accounts.connect_page"))
+    if current_app.config["MAIL_MODE"] == "gmail":
+        # This durable run owns the full manual refresh and is reconciled if enqueueing fails.
+        # Clear the catch-up flag so periodic reconciliation does not queue a duplicate import.
+        account.pending_sync = False
+        db.session.commit()
     run = create_run(
         current_user, account, kind="manual", limit=current_app.config["INDEX_MAX_THREADS"]
     )

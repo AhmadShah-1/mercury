@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import functools
+import json
+import time
 from datetime import UTC, datetime
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parsedate_to_datetime
@@ -24,7 +26,15 @@ from mercury.integrations.types import (
     ProviderThread,
     ProviderUnavailable,
     ReauthorizationRequired,
+    ThreadDiscovery,
 )
+
+# New Google Cloud projects currently receive 6,000 Gmail quota units per user per
+# minute and threads.get costs 40 units. Stay below that ceiling so normal reader
+# traffic and retries retain headroom during a large initial discovery.
+_DISCOVERY_QUOTA_UNITS_PER_SECOND = 80.0
+_THREADS_LIST_QUOTA_UNITS = 10
+_THREADS_GET_QUOTA_UNITS = 40
 
 
 def _retry_after(error: HttpError) -> int | None:
@@ -35,6 +45,19 @@ def _retry_after(error: HttpError) -> int | None:
         return None
 
 
+def _error_reasons(error: HttpError) -> set[str]:
+    """Extract only machine-readable reason codes; never expose the provider body."""
+    try:
+        payload = json.loads(error.content.decode("utf-8"))
+        return {
+            str(item.get("reason"))
+            for item in payload.get("error", {}).get("errors", [])
+            if item.get("reason")
+        }
+    except (AttributeError, TypeError, ValueError, UnicodeError):
+        return set()
+
+
 class GmailProvider:
     def __init__(self, account: GmailAccount):
         self.account = account
@@ -42,6 +65,18 @@ class GmailProvider:
         bundle = cipher.decrypt(account.encrypted_token_bundle or "")
         self.credentials = self._credentials_from_bundle(bundle, account.granted_scopes)
         self.service = self._build_service(self.credentials)
+        self._discovery_quota_ready_at = time.monotonic()
+
+    def _pace_discovery(self, quota_units: int) -> None:
+        """Apply a per-provider leaky-bucket pace to high-volume discovery calls."""
+        now = time.monotonic()
+        delay = self._discovery_quota_ready_at - now
+        if delay > 0:
+            time.sleep(delay)
+            now = time.monotonic()
+        self._discovery_quota_ready_at = max(self._discovery_quota_ready_at, now) + (
+            quota_units / _DISCOVERY_QUOTA_UNITS_PER_SECOND
+        )
 
     @staticmethod
     def _build_service(credentials: Credentials):
@@ -62,9 +97,13 @@ class GmailProvider:
                 raise LookupError("provider_resource_not_found") from None
             if status == 401:
                 raise ReauthorizationRequired("connection_needs_reauthorization") from None
-            if status == 429:
+            rate_limited = status == 429 or (
+                status == 403
+                and _error_reasons(error) & {"rateLimitExceeded", "userRateLimitExceeded"}
+            )
+            if rate_limited:
                 raise ProviderUnavailable(
-                    "provider_rate_limited", retry_after=_retry_after(error)
+                    "provider_rate_limited", retry_after=_retry_after(error) or 60
                 ) from None
             if status is not None and int(status) >= 500:
                 raise ProviderUnavailable(retry_after=_retry_after(error)) from None
@@ -152,38 +191,65 @@ class GmailProvider:
             self.account.provider_subject, result["emailAddress"], str(result["historyId"])
         )
 
-    def list_threads(self, *, limit: int, after_epoch: int) -> list[ProviderThread]:
+    def list_threads(self, *, limit: int, after_epoch: int) -> ThreadDiscovery:
         self._persist_refresh()
-        found: list[ProviderThread] = []
-        token = None
         query = f"after:{after_epoch} -in:spam -in:trash -label:drafts"
-        while len(found) < limit:
-            page = self._execute(
-                self.service.users()
-                .threads()
-                .list(
-                    userId="me", q=query, maxResults=min(100, limit - len(found)), pageToken=token
-                )
-            )
-            for item in page.get("threads", []):
-                try:
-                    raw = self._execute(
-                        self.service.users()
-                        .threads()
-                        .get(
-                            userId="me",
-                            id=item["id"],
-                            format="metadata",
-                            metadataHeaders=["Subject", "From", "To", "Date", "Message-ID"],
+        self._pace_discovery(_THREADS_LIST_QUOTA_UNITS)
+        first_page = self._execute(
+            self.service.users().threads().list(userId="me", q=query, maxResults=min(100, limit))
+        )
+        try:
+            estimated_count = min(limit, max(0, int(first_page.get("resultSizeEstimate", 0))))
+        except (TypeError, ValueError):
+            estimated_count = min(limit, len(first_page.get("threads", [])))
+
+        def iter_threads():
+            page = first_page
+            yielded = 0
+            while yielded < limit:
+                for item in page.get("threads", []):
+                    if yielded >= limit:
+                        return
+                    self._pace_discovery(_THREADS_GET_QUOTA_UNITS)
+                    try:
+                        raw = self._execute(
+                            self.service.users()
+                            .threads()
+                            .get(
+                                userId="me",
+                                id=item["id"],
+                                format="metadata",
+                                metadataHeaders=[
+                                    "Subject",
+                                    "From",
+                                    "To",
+                                    "Date",
+                                    "Message-ID",
+                                ],
+                            )
                         )
+                    except LookupError:
+                        continue  # Deleted between list and get; the next sync reconciles it.
+                    yielded += 1
+                    yield self._normalize_thread(raw, include_body=False)
+                if yielded >= limit:
+                    return
+                token = page.get("nextPageToken")
+                if not token:
+                    return
+                self._pace_discovery(_THREADS_LIST_QUOTA_UNITS)
+                page = self._execute(
+                    self.service.users()
+                    .threads()
+                    .list(
+                        userId="me",
+                        q=query,
+                        maxResults=min(100, limit - yielded),
+                        pageToken=token,
                     )
-                except LookupError:
-                    continue  # Deleted between list and get; the next sync reconciles it.
-                found.append(self._normalize_thread(raw, include_body=False))
-            token = page.get("nextPageToken")
-            if not token:
-                break
-        return found
+                )
+
+        return ThreadDiscovery(estimated_count=estimated_count, threads=iter_threads())
 
     def get_thread(self, thread_id: str) -> ProviderThread:
         self._persist_refresh()
@@ -194,6 +260,9 @@ class GmailProvider:
 
     def get_thread_metadata(self, thread_id: str) -> ProviderThread:
         self._persist_refresh()
+        # History catch-up can contain hundreds of changed threads, so it shares
+        # the same conservative per-account pace as initial discovery.
+        self._pace_discovery(_THREADS_GET_QUOTA_UNITS)
         raw = self._execute(
             self.service.users()
             .threads()

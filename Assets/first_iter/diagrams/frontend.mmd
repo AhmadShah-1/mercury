@@ -1,0 +1,17 @@
+flowchart LR
+  subgraph Server["Flask (server-side rendering)"]
+    T["Jinja templates<br/>base.html, inbox/*.html,<br/>components/*.html"]
+    S["static/ files served as-is<br/>css/mercury.css<br/>js/mercury.js, js/theme.js<br/>vendor/bootstrap.min.css, htmx.min.js"]
+  end
+  subgraph Browser
+    P["Full HTML page"]
+    H["HTMX: fetch an HTML fragment<br/>and swap it into the page"]
+    J["mercury.js: keyboard shortcuts,<br/>bulk select, dialogs, theme"]
+  end
+  T -- "render HTML (no JSON API)" --> P
+  S -- "&lt;link&gt; / &lt;script src&gt; from the same origin" --> P
+  P --> H
+  H -- "GET/POST with X-CSRFToken" --> T
+  T -- "HTML partial" --> H
+  P --> J
+  N["No npm, no bundler, no build step:<br/>edit a template or CSS file and reload"]

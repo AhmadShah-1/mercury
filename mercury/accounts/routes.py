@@ -128,6 +128,10 @@ def gmail_callback():
         flash("Gmail label synchronization is enabled.", "success")
         return redirect(url_for("accounts.settings"))
     account.ai_consent = bool(session.pop("gmail_ai_consent", False))
+    # The durable ProcessingRun below owns initial discovery and is reconciled if enqueueing
+    # fails. Do not also let pending-sync reconciliation schedule a duplicate full import.
+    account.pending_sync = False
+    db.session.commit()
     run = create_run(
         current_user, account, kind="initial", limit=current_app.config["INDEX_MAX_THREADS"]
     )

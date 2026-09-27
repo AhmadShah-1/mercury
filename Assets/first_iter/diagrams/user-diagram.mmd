@@ -1,0 +1,50 @@
+flowchart LR
+  USER(["Mercury user"])
+  ADMIN(["Operator / admin"])
+  WORKER(["Background worker<br/>(system actor)"])
+  GOOGLE(["Google<br/>(external system)"])
+
+  subgraph Start["1 · Getting started"]
+    direction TB
+    U1["Sign in with Google<br/>(or synthetic demo login)"]
+    U2["Read disclosure and<br/>connect Gmail"]
+    U3["Watch indexing progress"]
+  end
+  subgraph Organize["2 · Organizing"]
+    direction TB
+    U4["Browse Overview, Needs attention,<br/>Unsorted, buckets"]
+    U6["Move threads (single or bulk)"]
+    U7["Create, rename, merge,<br/>archive buckets"]
+    U8["Create exact-sender rules"]
+  end
+  subgraph Read["3 · Reading and acting"]
+    direction TB
+    U5["Open a thread: AI summary<br/>+ original text"]
+    U9["Mark handled / Not an action"]
+    U10["Open in Gmail<br/>(reply, attachments)"]
+  end
+  subgraph Account["4 · Account control"]
+    direction TB
+    U11["Enable optional<br/>Gmail label sync"]
+    U12["Disconnect Gmail /<br/>delete account"]
+  end
+  subgraph Ops["Operations"]
+    direction TB
+    A1["View metrics only<br/>(no mailbox content)"]
+  end
+  subgraph Background["Background work"]
+    direction TB
+    W1["Index, summarize, embed,<br/>suggest buckets"]
+    W2["Incremental sync and<br/>reconciliation"]
+    W3["Apply Mercury-owned labels"]
+  end
+
+  USER --> Start
+  USER --> Organize
+  USER --> Read
+  USER --> Account
+  ADMIN --> Ops
+  WORKER --> Background
+  Start -. "OAuth consent" .-> GOOGLE
+  Read -. "Gmail web" .-> GOOGLE
+  Background -. "Gmail API" .-> GOOGLE

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from mercury.integrations.types import MailProfile, ProviderMessage, ProviderThread
+from mercury.integrations.types import MailProfile, ProviderMessage, ProviderThread, ThreadDiscovery
 
 
 def _message(
@@ -182,8 +182,9 @@ class FakeGmailProvider:
     def profile(self) -> MailProfile:
         return MailProfile("dev-user", "alex@example.invalid", "1000")
 
-    def list_threads(self, *, limit: int, after_epoch: int) -> list[ProviderThread]:
-        return list(FIXTURE_THREADS[:limit])
+    def list_threads(self, *, limit: int, after_epoch: int) -> ThreadDiscovery:
+        threads = FIXTURE_THREADS[:limit]
+        return ThreadDiscovery(estimated_count=len(threads), threads=threads)
 
     def get_thread(self, thread_id: str) -> ProviderThread:
         for thread in FIXTURE_THREADS:

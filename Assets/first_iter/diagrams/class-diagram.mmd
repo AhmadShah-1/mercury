@@ -1,0 +1,168 @@
+classDiagram
+  direction LR
+
+  class User {
+    +UUID id
+    +str google_subject
+    +str email
+    +str role
+    +bool active
+    +UUID session_generation
+  }
+  class GmailAccount {
+    +UUID id
+    +str connection_state
+    +int connection_generation
+    +str last_history_id
+    +bool pending_sync
+    +bool ai_consent
+    +bool label_write_consent
+    +str encrypted_token_bundle
+  }
+  class EmailThread {
+    +str gmail_thread_id
+    +str subject
+    +bool gmail_unread
+    +str content_version
+    +str processing_state
+    +datetime last_opened_at
+  }
+  class MessageReference {
+    +str gmail_message_id
+    +str sender_address
+    +datetime sent_at
+  }
+  class ThreadAnalysis {
+    +str summary
+    +bool action_required
+    +str action_type
+    +str action_status
+    +bool stale
+  }
+  class ThreadEmbedding {
+    +vector~512~ embedding
+    +str model
+  }
+  class Bucket {
+    +str name
+    +str origin
+    +bool archived
+  }
+  class BucketAssignment {
+    +str origin
+    +bool locked_by_user
+  }
+  class SenderRule {
+    +str sender_address
+    +int priority
+  }
+  class ProcessingRun {
+    +str kind
+    +str stage
+    +str status
+    +int found_count
+    +int completed_count
+    +str safe_error_code
+  }
+
+  User "1" --> "0..1" GmailAccount
+  GmailAccount "1" --> "*" EmailThread
+  EmailThread "1" --> "*" MessageReference
+  EmailThread "1" --> "0..1" ThreadAnalysis
+  EmailThread "1" --> "0..1" ThreadEmbedding
+  EmailThread "1" --> "0..1" BucketAssignment
+  Bucket "1" --> "*" BucketAssignment
+  Bucket "1" --> "*" SenderRule
+  GmailAccount "1" --> "*" ProcessingRun
+
+  class MailProvider {
+    <<Protocol>>
+    +profile() MailProfile
+    +list_threads(limit, after_epoch) list~ProviderThread~
+    +get_thread(thread_id) ProviderThread
+    +get_thread_metadata(thread_id) ProviderThread
+  }
+  class GmailProvider {
+    -Credentials credentials
+    -_persist_refresh()
+    -_execute(request)
+    +list_history(start_id, page_token)
+    +watch(topic) / stop_watch()
+    +create_label() / apply_label()
+  }
+  class FakeGmailProvider {
+    synthetic fixture mailbox
+  }
+  MailProvider <|.. GmailProvider
+  MailProvider <|.. FakeGmailProvider
+
+  class AIProvider {
+    <<Protocol>>
+    +str name
+    +summarize(text, message_ids) AnalysisResult
+    +embed(text) tuple
+  }
+  class OpenAIProvider
+  class FakeAIProvider
+  AIProvider <|.. OpenAIProvider
+  AIProvider <|.. FakeAIProvider
+
+  class ProviderThread {
+    <<dataclass>>
+    +str id
+    +str subject
+    +tuple messages
+  }
+  class ReauthorizationRequired {
+    <<exception>>
+  }
+  class ProviderUnavailable {
+    <<exception>>
+    +int retry_after
+  }
+  GmailProvider ..> ProviderThread : returns
+  GmailProvider ..> ReauthorizationRequired : raises
+  GmailProvider ..> ProviderUnavailable : raises
+
+  class TokenCipher {
+    +encrypt(dict) str
+    +decrypt(str) dict
+    +rotate(str) str
+  }
+  GmailProvider ..> TokenCipher : decrypts tokens
+
+  class MercuryRetry {
+    +max_attempts
+    +get_retry_decision(exception, job)
+  }
+  class inbox_service {
+    <<module>>
+    +index_account()
+    +upsert_provider_thread()
+    +owned_thread()
+  }
+  class intelligence_service {
+    <<module>>
+    +analyze_thread()
+    +analyze_pending()
+  }
+  class buckets_service {
+    <<module>>
+    +move_thread()
+    +merge_buckets()
+    +apply_sender_rule()
+  }
+  class jobs_tasks {
+    <<module>>
+    +discover_recent_threads()
+    +sync_account_history_task()
+    +reconcile_pending_work()
+    +retry_stalled_jobs()
+    +enqueue_discovery()
+  }
+  jobs_tasks ..> MercuryRetry
+  jobs_tasks ..> inbox_service
+  jobs_tasks ..> intelligence_service
+  inbox_service ..> MailProvider
+  intelligence_service ..> AIProvider
+  intelligence_service ..> MailProvider

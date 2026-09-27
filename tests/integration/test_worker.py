@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -15,8 +16,14 @@ from sqlalchemy import select, text
 
 from mercury.accounts.models import GmailAccount
 from mercury.extensions import db
-from mercury.inbox.models import ProcessingRun
-from mercury.integrations.types import ProviderUnavailable, ReauthorizationRequired
+from mercury.inbox.models import EmailThread, ProcessingRun
+from mercury.inbox.service import index_account
+from mercury.integrations.fake_gmail import FIXTURE_THREADS
+from mercury.integrations.types import (
+    ProviderUnavailable,
+    ReauthorizationRequired,
+    ThreadDiscovery,
+)
 from mercury.jobs import tasks as task_module
 from mercury.jobs.queue import create_queue_app
 from mercury.jobs.tasks import MAIL_ATTEMPTS, bind_flask_app, enqueue_discovery, reconcile
@@ -110,6 +117,44 @@ def test_transient_failure_schedules_backoff_retry_with_safe_code(app, connected
         )
         # Retry-After (30s) is honored as the minimum delay.
         assert scheduled >= datetime.now(UTC) + timedelta(seconds=20)
+
+
+def test_discovery_persists_each_thread_before_a_transient_stream_failure(
+    app, connected, monkeypatch
+):
+    message = replace(
+        FIXTURE_THREADS[0].messages[0],
+        id="partial-progress-message",
+        internet_message_id="<partial-progress-message@fixtures.invalid>",
+    )
+    thread = replace(FIXTURE_THREADS[0], id="partial-progress-thread", messages=(message,))
+
+    class PartialProvider:
+        def list_threads(self, *, limit, after_epoch):
+            del limit, after_epoch
+
+            def stream():
+                yield thread
+                raise ProviderUnavailable("provider_rate_limited", retry_after=60)
+
+            return ThreadDiscovery(estimated_count=2, threads=stream())
+
+    with app.app_context():
+        account = db.session.scalar(select(GmailAccount))
+        run = _new_run(account)
+        monkeypatch.setitem(
+            app.extensions["mercury"], "mail_provider", lambda _account: PartialProvider()
+        )
+
+        with pytest.raises(ProviderUnavailable, match="provider_rate_limited"):
+            index_account(account, run, limit=2)
+        db.session.rollback()
+
+        db.session.refresh(run)
+        assert (run.found_count, run.completed_count) == (2, 1)
+        assert db.session.scalar(
+            select(EmailThread).where(EmailThread.gmail_thread_id == "partial-progress-thread")
+        )
 
 
 def test_permanent_failure_is_not_retried_and_run_is_failed(app, connected, monkeypatch):

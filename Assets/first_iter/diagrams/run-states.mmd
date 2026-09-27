@@ -1,0 +1,15 @@
+stateDiagram-v2
+  [*] --> pending: create_run (connect / Sync now)
+  pending --> running: worker starts indexing
+  running --> succeeded: all threads indexed + checkpoint saved
+  running --> pending: transient error (stage = retrying) or stalled > 15 min
+  running --> failed: permanent error or last retry used up
+  pending --> failed: stuck > 2 hours (processing_stalled)
+  succeeded --> [*]
+  failed --> [*]
+  note right of failed
+    safe_error_code examples
+    connection_needs_reauthorization
+    provider_rate_limited
+    processing_stalled
+  end note

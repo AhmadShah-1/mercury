@@ -1,0 +1,191 @@
+erDiagram
+  users ||--o| gmail_accounts : "owns (max 1 in V1)"
+  users ||--o{ oauth_attempts : "starts"
+  gmail_accounts ||--o{ email_threads : "indexes"
+  email_threads ||--o{ message_references : "contains"
+  email_threads ||--o| thread_analyses : "summarized by"
+  email_threads ||--o| thread_embeddings : "embedded as"
+  email_threads ||--o| bucket_assignments : "placed by"
+  buckets ||--o{ bucket_assignments : "holds"
+  gmail_accounts ||--o{ buckets : "organizes"
+  buckets ||--o{ sender_rules : "target of"
+  buckets ||--o| gmail_label_mappings : "mirrored as"
+  gmail_accounts ||--o{ processing_runs : "progress of"
+  users ||--o{ usage_buckets : "budget windows"
+  users ||--o{ ai_usage : "AI call ledger"
+
+  users {
+    uuid id PK
+    string google_subject UK
+    string email UK
+    string display_name
+    string role "user | admin"
+    bool active
+    uuid session_generation
+    timestamptz created_at
+    timestamptz deletion_requested_at
+  }
+  gmail_accounts {
+    uuid id PK
+    uuid user_id FK "unique"
+    string provider_subject
+    string mailbox_address
+    text encrypted_token_bundle "Fernet"
+    jsonb granted_scopes
+    string connection_state
+    int connection_generation
+    string last_history_id
+    bool pending_sync
+    timestamptz watch_expires_at
+    timestamptz last_synced_at
+    bool ai_consent
+    bool label_write_consent
+    string disclosure_version
+  }
+  oauth_attempts {
+    uuid id PK
+    uuid user_id FK
+    string browser_session_id
+    string purpose
+    string state_digest UK
+    string nonce
+    text encrypted_verifier "PKCE"
+    string return_path
+    timestamptz expires_at
+    timestamptz consumed_at
+  }
+  security_audit_events {
+    uuid id PK
+    string event_type
+    uuid actor_id
+    uuid resource_id
+    string outcome
+    timestamptz created_at
+  }
+  email_threads {
+    uuid id PK
+    uuid user_id FK
+    uuid gmail_account_id FK
+    string gmail_thread_id
+    string subject
+    jsonb participants
+    string snippet
+    timestamptz latest_message_at
+    bool gmail_unread
+    bool attachment_present
+    string content_version
+    string processing_state
+    timestamptz last_indexed_at
+    timestamptz last_opened_at
+  }
+  message_references {
+    uuid id PK
+    uuid user_id FK
+    uuid thread_id FK
+    string gmail_message_id
+    string internet_message_id
+    string sender_name
+    string sender_address
+    jsonb recipients
+    timestamptz sent_at
+    jsonb gmail_labels
+    bool attachment_present
+  }
+  thread_analyses {
+    uuid id PK
+    uuid thread_id FK "unique"
+    uuid user_id
+    string summary
+    bool action_required
+    string action_type
+    string action_text
+    date due_date
+    string source_message_id
+    bool uncertain
+    string model
+    string prompt_version
+    string content_version
+    string action_status
+    bool stale
+  }
+  thread_embeddings {
+    uuid id PK
+    uuid thread_id FK "unique"
+    uuid user_id
+    vector embedding "512 dims"
+    string provider
+    string model
+    int dimensions
+    string pipeline_version
+    string content_version
+  }
+  processing_runs {
+    uuid id PK
+    uuid user_id FK
+    uuid gmail_account_id FK
+    string kind
+    string stage
+    string status
+    int found_count
+    int completed_count
+    int requested_limit
+    string safe_error_code
+    timestamptz created_at
+    timestamptz finished_at
+  }
+  buckets {
+    uuid id PK
+    uuid user_id FK
+    uuid gmail_account_id FK
+    string name
+    string purpose
+    string origin "suggested | user"
+    bool user_confirmed
+    bool archived
+  }
+  bucket_assignments {
+    uuid id PK
+    uuid thread_id FK "unique"
+    uuid bucket_id FK "nullable = Unsorted"
+    string origin "model | rule | user"
+    float score
+    bool locked_by_user
+    int version
+  }
+  sender_rules {
+    uuid id PK
+    uuid bucket_id FK
+    string sender_address
+    bool enabled
+    int priority
+  }
+  gmail_label_mappings {
+    uuid id PK
+    uuid bucket_id FK "unique"
+    string gmail_label_id
+    string desired_name
+    string sync_status
+  }
+  usage_buckets {
+    uuid id PK
+    uuid user_id FK "null = global"
+    string subject_key
+    string category
+    date window_start
+    numeric reserved_usd
+    numeric spent_usd
+    int operation_count
+  }
+  ai_usage {
+    uuid id PK
+    uuid user_id FK
+    uuid thread_id
+    string category
+    string model
+    int input_tokens
+    int output_tokens
+    int embedding_tokens
+    numeric reserved_usd
+    numeric actual_usd
+    string status
+  }

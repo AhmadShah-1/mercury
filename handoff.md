@@ -241,7 +241,13 @@ Items 1–8 from session 1 are done (slice A/B). Remaining:
    private DB connectivity. Add Log Analytics retention configuration if desired.
 4. Review the pinned `aquasecurity/trivy-action` commit before first CI use; decide whether to
    add `make browser-test` to CI (needs `playwright install --with-deps chromium`).
-5. Consider a manual-sync cooldown for `POST /app/sync` in real Gmail mode (currently a full
+5. **Wire automatic bucket discovery.** `buckets/clustering.py` (PCA + HDBSCAN,
+   `conservative_choice`) is unit-tested but no task calls it; real Gmail users start with
+   everything Unsorted. Add a `discover_buckets` worker task (bounded, one at a time) that
+   creates `origin="suggested"` buckets and model assignments without touching locked ones.
+6. **Revoke the Google OAuth token on disconnect/delete** (best effort, spec §22); currently only
+   the watch is stopped and the encrypted token is deleted locally.
+7. Consider a manual-sync cooldown for `POST /app/sync` in real Gmail mode (currently a full
    bounded re-index, coalesced per run) and an undo for bulk moves (currently count confirmation
    only).
 

@@ -1,0 +1,32 @@
+flowchart LR
+  subgraph Browser["Your browser"]
+    UI["Jinja HTML pages<br/>+ HTMX + mercury.js"]
+  end
+
+  subgraph Container["One Docker image, two roles"]
+    WEB["web role<br/>Gunicorn + Flask<br/>(pages, forms, auth, reader)"]
+    WORKER["worker role<br/>Procrastinate worker<br/>(indexing, AI, sync, labels)"]
+  end
+
+  DB[("PostgreSQL 17 + pgvector<br/>app tables + vectors<br/>+ procrastinate_jobs queue")]
+
+  subgraph Google["Google"]
+    GMAIL["Gmail API"]
+    OIDC["Google sign-in<br/>(OAuth / OIDC)"]
+    PUBSUB["Pub/Sub push"]
+  end
+
+  OPENAI["OpenAI API<br/>(summaries + embeddings)"]
+  DOPPLER["Doppler<br/>(secrets injected as<br/>environment variables)"]
+
+  UI -- "HTTPS + session cookie + CSRF token" --> WEB
+  WEB -- "read/write rows,<br/>enqueue jobs" --> DB
+  WORKER -- "claim jobs,<br/>write results" --> DB
+  WEB -- "on-demand reader fetch only" --> GMAIL
+  WORKER -- "bounded reads,<br/>optional label writes" --> GMAIL
+  WORKER -- "selected text only" --> OPENAI
+  WEB -- "sign-in / consent redirects" --> OIDC
+  GMAIL -- "mailbox changed" --> PUBSUB
+  PUBSUB -- "signed webhook<br/>POST /webhooks/google/pubsub" --> WEB
+  DOPPLER -. "doppler run -- ..." .-> WEB
+  DOPPLER -. "doppler run -- ..." .-> WORKER

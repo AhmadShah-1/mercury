@@ -1,0 +1,28 @@
+sequenceDiagram
+  autonumber
+  actor U as User (browser)
+  participant JS as mercury.js + HTMX
+  participant W as Flask web
+  participant DB as PostgreSQL
+  participant GM as Gmail API
+
+  U->>JS: click a thread row (or press Enter)
+  JS->>W: GET /app/threads/<id> (HX-Request: true)
+  W->>DB: owned_thread(user_id, id), else 404
+  W->>DB: analysis, bucket, message refs (all filtered by user_id)
+  W->>DB: set last_opened_at on first open (Gmail unread state untouched)
+  W-->>JS: reader partial: subject, AI summary, actions, skeleton for body
+  JS->>W: GET /app/threads/<id>/body
+  W->>DB: ownership check again
+  W->>GM: threads.get format=full (timeout, at most 1 retry)
+  alt success
+    W->>W: MIME to plain text (skip attachments, HTML converted to text)
+    W-->>JS: escaped text, newest first, Cache-Control: no-store
+  else deleted
+    W-->>JS: 404 "no longer available"
+  else access revoked
+    W-->>JS: 409 "Reconnect Gmail"
+  else Gmail down or rate-limited
+    W-->>JS: 503 "temporarily unavailable" + Try again
+  end
+  Note over W,DB: The message body is never written to the database, queue, logs, or browser storage
