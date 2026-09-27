@@ -7,6 +7,7 @@ from flask import current_app
 from sqlalchemy import delete, select
 
 from mercury.accounts.models import GmailAccount, SecurityAuditEvent, User
+from mercury.buckets.crates import ensure_misc_crate
 from mercury.extensions import db
 
 DEMO_SUBJECT = "mercury-synthetic-user"
@@ -43,6 +44,7 @@ def connect_fake_mailbox(user: User, *, ai_consent: bool) -> GmailAccount:
         account.ai_consent = ai_consent
         account.connection_generation += 1
     db.session.commit()
+    ensure_misc_crate(account)
     return account
 
 

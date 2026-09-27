@@ -7,7 +7,8 @@ from collections import defaultdict
 from datetime import UTC, datetime
 
 from flask import current_app
-from sqlalchemy import update
+from sqlalchemy import exists, update
+from sqlalchemy.exc import IntegrityError
 
 from mercury.accounts.models import GmailAccount
 from mercury.buckets.classification import (
@@ -25,7 +26,7 @@ from mercury.buckets.clustering import (
     fit_scores,
     representative_indices,
 )
-from mercury.buckets.models import Bucket
+from mercury.buckets.models import Bucket, Crate
 from mercury.buckets.service import unique_bucket_name
 from mercury.extensions import db
 from mercury.integrations.types import BucketSuggestion, InvalidProviderOutput
@@ -217,7 +218,7 @@ def split_buckets(
 
     Only buckets that grew since their last check are re-clustered. The part holding the most
     manual and rule placements keeps the bucket's identity and name; only Mercury's own
-    placements move to the new bucket. Buckets produced by a user merge are never split.
+    placements move to the new bucket. Buckets from the retired destructive merge are never split.
     """
     generation = account.connection_generation
     created = 0
@@ -272,9 +273,30 @@ def split_buckets(
             bucket.reviewed_member_count -= moved
             bucket.meaning_stale = True
             db.session.commit()
+            if bucket.crate_origin == "user" and bucket.crate_id is not None:
+                _join_crate(child, bucket.crate_id)
             created += 1
         db.session.commit()
     return created
+
+
+def _join_crate(child: Bucket, crate_id: uuid.UUID) -> None:
+    """A topic split off a bucket the user crated belongs with it, if that crate still exists.
+
+    The user may have emptied (and so deleted) the crate while the naming call ran; the child
+    then simply stays out of any crate instead of failing the pass.
+    """
+    try:
+        with db.session.begin_nested():
+            db.session.execute(
+                update(Bucket)
+                .where(Bucket.id == child.id, exists().where(Crate.id == crate_id))
+                .values(crate_id=crate_id, crate_origin="user")
+                .execution_options(synchronize_session=False)
+            )
+    except IntegrityError:
+        pass
+    db.session.commit()
 
 
 def _meaning_due(bucket: Bucket, count: int) -> bool:
@@ -287,7 +309,7 @@ def _meaning_due(bucket: Bucket, count: int) -> bool:
 def refresh_meanings(
     account: GmailAccount, rows: list[ThreadVector], active: dict[uuid.UUID, Bucket]
 ) -> int:
-    """Update Mercury's meaning for buckets that were split, merged, created, or have grown.
+    """Update Mercury's meaning for buckets that were split, created, or have grown.
 
     The display name follows only while the user has not renamed the bucket; a user's name is
     never replaced, and the change is surfaced as "meaning updated" instead.

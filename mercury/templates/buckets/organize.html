@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% from "components/icons.html" import icon %}
+{% from "components/ui.html" import badge, csrf_input, empty %}
+{% from "components/crates.html" import star_toggle, bucket_tile, next_input %}
+{% block title %}Organize crates and buckets — Mercury{% endblock %}
+{% block body_class %}app-page organize-page{% endblock %}
+{% block footer %}{% endblock %}
+{% block content %}
+{% set lib = library %}
+<section class="org" aria-labelledby="org-title">
+  <header class="org-head">
+    <div class="org-head-copy">
+      <p class="eyebrow">Edit</p>
+      <h1 class="page-title" id="org-title" tabindex="-1">Crates &amp; buckets</h1>
+      <p class="org-lead"><span class="hint-drag">Drag a bucket onto another to make a crate, or into a crate to add it.</span><span class="hint-touch">Use a bucket's move button to put it in a crate or start a new one.</span> Crates only group buckets: every conversation stays in its bucket, and Gmail isn't changed.</p>
+    </div>
+    <div class="org-head-actions">
+      <a class="btn btn-ghost" href="{{ url_for('buckets.create') }}">{{ icon("plus", "icon-sm") }} New bucket</a>
+      <a class="btn btn-primary" href="{{ url_for('inbox.workspace') }}">{{ icon("check", "icon-sm") }} Done</a>
+    </div>
+  </header>
+
+  {% if not lib.buckets %}
+  <div class="panel org-empty">
+    {% call empty("Nothing to organize yet", "bucket") %}<p>Buckets appear here after Mercury indexes your mail, or <a href="{{ url_for('buckets.create') }}">create one</a> now.</p>{% endcall %}
+  </div>
+  {% endif %}
+
+  <div class="org-board" id="org-board" data-org-board data-home-url="{{ url_for('inbox.workspace') }}">
+    <section class="org-tray" data-drop="loose" aria-labelledby="loose-title">
+      <div class="org-section-head">
+        <h2 class="org-section-title" id="loose-title">{{ icon("bucket") }}<span>Not in a crate</span><span class="org-count">{{ lib.loose|length }}</span></h2>
+        <p class="org-section-hint"><span class="hint-drag">Drop one of these onto another to make a crate of both. Drop any bucket here to take it out of its crate.</span><span class="hint-touch">Buckets that aren't in a crate.</span></p>
+      </div>
+      <ul class="tile-list" role="list" aria-labelledby="loose-title">
+        {% for bucket in lib.loose %}{{ bucket_tile(bucket, lib, next_path) }}{% endfor %}
+      </ul>
+      <p class="tray-empty{% if not lib.loose %} is-shown{% endif %}">{{ icon("check-circle", "icon-sm") }} Every bucket is in a crate.</p>
+    </section>
+
+    <section class="org-crates" aria-labelledby="crates-title">
+      <div class="org-section-head">
+        <h2 class="org-section-title" id="crates-title">{{ icon("crate") }}<span>Crates</span><span class="org-count">{{ lib.crates|length }}</span></h2>
+        <p class="org-section-hint">Starred crates and buckets are pinned in the sidebar.<span class="hint-drag"> Drag a crate by its header onto another crate to combine them.</span><span class="hint-touch"> Each crate's options menu can rename, combine, or unpack it.</span></p>
+      </div>
+      <ul class="crate-grid" role="list" aria-labelledby="crates-title">
+        <li class="crate-card crate-new" data-drop="new-crate">
+          <div class="crate-new-art" aria-hidden="true">{{ icon("crate") }}<span class="crate-new-plus">{{ icon("plus", "icon-xs") }}</span></div>
+          <h3 class="crate-new-title">New crate</h3>
+          <p class="crate-new-sub"><span class="hint-drag">Drop a bucket here to start one.</span><span class="hint-touch">Choose the buckets to put in it.</span></p>
+          <details class="crate-new-form">
+            <summary class="btn btn-quiet btn-sm">Choose buckets…</summary>
+            <form class="form-stack" method="post" action="{{ url_for('buckets.crate_create') }}" data-org-form data-toast="Created a new crate">
+              {{ csrf_input() }}
+              {{ next_input(next_path) }}
+              <div>
+                <label class="form-label" for="new-crate-name">Name</label> <span class="optional-tag">Optional</span>
+                <input class="form-control form-control-sm" id="new-crate-name" name="name" maxlength="80" autocomplete="off" placeholder="e.g. Money">
+              </div>
+              <fieldset class="check-fieldset">
+                <legend class="form-label">Buckets to put in it</legend>
+                <div class="check-list">
+                  {% for bucket in lib.buckets %}
+                  {% set other = lib.crate_of.get(bucket.id) %}
+                  <label class="check-row">
+                    <input class="form-check-input" type="checkbox" name="bucket_ids" value="{{ bucket.id }}">
+                    <span class="check-row-name">{{ bucket.name }}</span>
+                    {% if other %}<span class="check-row-meta">in {{ other.name }}</span>{% endif %}
+                  </label>
+                  {% endfor %}
+                </div>
+              </fieldset>
+              <button class="btn btn-primary btn-sm" type="submit">{{ icon("check", "icon-sm") }} Create crate</button>
+            </form>
+          </details>
+        </li>
+        {% for crate in lib.crates %}
+        {% set members = lib.members.get(crate.id, []) %}
+        {% set size = lib.crate_size.get(crate.id, 0) %}
+        {% set others = lib.crates|rejectattr("id", "equalto", crate.id)|list %}
+        <li class="crate-card{% if crate.is_misc %} is-misc{% endif %}{% if not members %} is-empty{% endif %}" data-drop="crate" data-crate-id="{{ crate.id }}" data-name="{{ crate.name }}" data-focus-key="crate-{{ crate.id }}">
+          <div class="crate-card-head"{% if members %} draggable="true" data-drag="crate" data-crate-id="{{ crate.id }}" data-name="{{ crate.name }}" data-combine-url="{{ url_for('buckets.crate_combine', crate_id=crate.id) }}"{% endif %}>
+            <span class="crate-card-icon" aria-hidden="true">{{ icon("crate") }}</span>
+            <div class="crate-card-title">
+              <h3 class="crate-card-name"><a href="{{ url_for('inbox.crate_workspace', crate_id=crate.id) }}" draggable="false">{{ crate.name }}</a></h3>
+              <p class="crate-card-meta">{{ members|length }} {{ "bucket" if members|length == 1 else "buckets" }} · {{ size }} {{ "conversation" if size == 1 else "conversations" }}</p>
+            </div>
+            <div class="crate-card-actions">
+              {{ star_toggle("crate", crate, next_path, small=True) }}
+              <details class="menu menu-end" data-menu data-focus-key="crate-menu-{{ crate.id }}">
+                <summary class="icon-btn icon-btn-sm" title="Rename, combine, or unpack">{{ icon("more", "icon-sm") }}<span class="visually-hidden">Options for {{ crate.name }}</span></summary>
+                <div class="menu-pop menu-pop-wide">
+                  <form class="menu-form menu-rename" method="post" action="{{ url_for('buckets.crate_rename', crate_id=crate.id) }}" data-org-form data-toast="Crate renamed">
+                    {{ csrf_input() }}
+                    {{ next_input(next_path) }}
+                    <label class="menu-title" for="rename-{{ crate.id }}">Rename</label>
+                    <div class="menu-inline">
+                      <input class="form-control form-control-sm" id="rename-{{ crate.id }}" name="name" value="{{ crate.name }}" maxlength="80" required autocomplete="off">
+                      <button class="btn btn-quiet btn-sm" type="submit">Save</button>
+                    </div>
+                  </form>
+                  {% if members and others %}
+                  <div class="menu-sep" role="presentation"></div>
+                  <p class="menu-title">Move all its buckets into</p>
+                  {% for other in others %}
+                  <form class="menu-form" method="post" action="{{ url_for('buckets.crate_combine', crate_id=crate.id) }}" data-org-form data-toast="Moved everything in {{ crate.name }} into {{ other.name }}">
+                    {{ csrf_input() }}
+                    {{ next_input(next_path) }}
+                    <input type="hidden" name="target_id" value="{{ other.id }}">
+                    <button class="menu-item" type="submit">{{ icon("crate", "icon-sm") }}<span class="menu-item-label">{{ other.name }}</span></button>
+                  </form>
+                  {% endfor %}
+                  {% endif %}
+                  {% if members %}
+                  <div class="menu-sep" role="presentation"></div>
+                  <form class="menu-form" method="post" action="{{ url_for('buckets.crate_dissolve', crate_id=crate.id) }}" data-org-form data-toast="{{ ('Emptied ' ~ crate.name) if crate.is_misc else ('Unpacked ' ~ crate.name) }}" data-confirm="{{ members|length }} {{ 'bucket goes' if members|length == 1 else 'buckets go' }} back to “Not in a crate”. {% if crate.is_misc %}Misc itself stays.{% else %}The crate is removed.{% endif %} Conversations, rules, and Gmail are not changed." data-confirm-title="{{ 'Empty Misc?' if crate.is_misc else 'Unpack this crate?' }}" data-confirm-label="{{ 'Empty Misc' if crate.is_misc else 'Unpack crate' }}">
+                    {{ csrf_input() }}
+                    {{ next_input(next_path) }}
+                    <button class="menu-item menu-item-danger" type="submit">{{ icon("take-out", "icon-sm") }}<span class="menu-item-label">{{ "Empty Misc" if crate.is_misc else "Unpack crate" }}</span></button>
+                  </form>
+                  {% endif %}
+                </div>
+              </details>
+            </div>
+          </div>
+          {% if crate.is_misc %}
+          <p class="crate-note">{{ badge("Automatic", "neutral", "sparkle") }} Mercury keeps its own suggested buckets here while they have fewer than {{ lib.misc_threshold }} conversations. Buckets you place yourself stay put.</p>
+          {% endif %}
+          <ul class="tile-list" role="list" aria-label="Buckets in {{ crate.name }}">
+            {% for bucket in members %}{{ bucket_tile(bucket, lib, next_path) }}{% endfor %}
+          </ul>
+          <p class="crate-empty">{{ icon("bucket", "icon-sm") }} <span class="hint-drag">Drop buckets here</span><span class="hint-touch">Empty · use a bucket's move button</span></p>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+</section>
+{% endblock %}

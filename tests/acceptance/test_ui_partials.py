@@ -131,7 +131,8 @@ def test_bulk_move_header_suppresses_per_thread_flash_only(app, client, connecte
         data={"bucket_id": str(bucket_id), "csrf_token": token},
         headers={"X-CSRFToken": token, "X-Mercury-Bulk": "1"},
     )
-    assert moved.status_code == 302
+    # 204, never a redirect, so the script can tell success from a sign-in redirect.
+    assert moved.status_code == 204
     with app.app_context():
         assignment = db.session.scalar(
             select(BucketAssignment).where(BucketAssignment.thread_id == thread_id)

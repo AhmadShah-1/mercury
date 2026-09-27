@@ -22,7 +22,7 @@
     <p class="eyebrow">Original subject</p>
     <{{ subject_tag }} class="reader-subject" id="reader-subject" tabindex="-1">{{ thread.subject }}</{{ subject_tag }}>
     <div class="reader-badges">
-      {% if in_bucket %}{{ badge(bucket.name, "bucket", "folder", sr_prefix="Bucket:") }}{% else %}{{ badge("Unsorted", "muted", "unsorted", sr_prefix="Bucket:") }}{% endif %}
+      {% if in_bucket %}{{ badge(bucket.name, "bucket", "bucket", sr_prefix="Bucket:") }}{% else %}{{ badge("Unsorted", "muted", "unsorted", sr_prefix="Bucket:") }}{% endif %}
       {% if assignment and assignment.locked_by_user %}{{ badge("Placed by you", "neutral", "lock", title="Suggestions won't move this conversation") }}{% endif %}
       {% if thread.gmail_unread %}{{ badge("Unread in Gmail", "unread", "mail") }}{% endif %}
       {% if thread.attachment_present %}{{ badge("Attachments in Gmail", "muted", "paperclip") }}{% endif %}
@@ -88,7 +88,7 @@
   </section>
 
   <section class="organize-card" aria-labelledby="organize-heading">
-    <h3 class="organize-title" id="organize-heading">{{ icon("move", "icon-sm") }} Bucket</h3>
+    <h3 class="organize-title" id="organize-heading">{{ icon("bucket", "icon-sm") }} Bucket</h3>
     {% if buckets %}
     <form class="move-form" method="post" action="{{ url_for('inbox.move', thread_id=thread.id) }}" hx-post="{{ url_for('inbox.move', thread_id=thread.id) }}" hx-target="#reader-panel" hx-swap="innerHTML" hx-disabled-elt="find button">
       {{ move_form.csrf_token }}

@@ -10,6 +10,7 @@ from flask import current_app, request, session
 from sqlalchemy import select
 
 from mercury.accounts.models import GmailAccount, OAuthAttempt, User
+from mercury.buckets.crates import ensure_misc_crate
 from mercury.extensions import db, oauth
 
 OIDC_SCOPES = "openid email profile"
@@ -150,4 +151,5 @@ def connect_google_account(user: User, token: dict) -> GmailAccount:
         account.connection_state = "connected"
         account.connection_generation += 1
     db.session.commit()
+    ensure_misc_crate(account)
     return account

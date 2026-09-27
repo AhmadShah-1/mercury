@@ -3,6 +3,7 @@
 {% from "components/brand.html" import mark %}
 {% from "components/ui.html" import badge, state, empty, count, connection_badge %}
 {% from "inbox/_thread_row.html" import thread_row with context %}
+{% from "components/crates.html" import star_toggle, place_menu, place_button, bucket_drag %}
 {% block title %}{{ view_label if current_user.gmail_account else "Workspace" }} — Mercury{% endblock %}
 {% block body_class %}app-page{% endblock %}
 {% block footer %}{% endblock %}
@@ -25,35 +26,82 @@
 </section>
 {% else %}
 {% set run_active = latest_run and latest_run.status in ["pending", "running"] %}
-<div class="workspace" data-workspace>
+<div class="workspace" data-workspace data-home-url="{{ url_for('inbox.workspace') }}">
   <aside class="ws-nav" aria-label="Workspace navigation">
-    <nav class="ws-nav-scroll">
+    <nav class="ws-nav-scroll" data-ws-nav>
       <ul class="nav-list" role="list">
         {% set view_icons = {"overview": "grid", "attention": "flag", "all": "layers", "unsorted": "unsorted"} %}
         {% set view_counts = {"overview": None, "attention": counts.attention, "all": counts.total, "unsorted": counts.unsorted} %}
         {% for key, label in views.items() %}
-        <li><a class="nav-item" href="{{ url_for('inbox.workspace') if key == 'overview' else url_for('inbox.workspace', view=key) }}"{% if not selected_bucket and view == key %} aria-current="page"{% endif %}>
+        <li><a class="nav-item" href="{{ url_for('inbox.workspace') if key == 'overview' else url_for('inbox.workspace', view=key) }}"{% if not selected_bucket and not selected_crate and view == key %} aria-current="page"{% endif %}>
           {{ icon(view_icons[key]) }}<span class="nav-label">{{ label }}</span>{{ count(view_counts[key], "conversations") }}
         </a></li>
         {% endfor %}
       </ul>
-      <div class="nav-group">
+      {% if library %}
+      {% set lib = library %}
+      <div data-ws-nav-library>
+      <div class="nav-group nav-group-crates">
         <div class="nav-heading">
+          <h2 class="nav-heading-text" id="crates-heading">Crates</h2>
+          <a class="nav-edit" href="{{ url_for('buckets.organize') }}" title="Organize crates and buckets">{{ icon("pencil", "icon-xs") }}<span>Edit</span><span class="visually-hidden"> crates and buckets</span></a>
+        </div>
+        {% if lib.nav_crates %}
+        <ul class="nav-list" role="list" aria-labelledby="crates-heading">
+          {% for crate in lib.nav_crates %}
+          {% set expanded = lib.expanded_crate_id == crate.id %}
+          <li class="nav-crate{% if expanded %} is-expanded{% endif %}">
+            <a class="nav-item" href="{{ url_for('inbox.crate_workspace', crate_id=crate.id) }}" data-drop="crate" data-crate-id="{{ crate.id }}" data-name="{{ crate.name }}"{% if selected_crate and selected_crate.id == crate.id %} aria-current="page"{% endif %}>
+              {{ icon("crate") }}<span class="nav-label">{{ crate.name }}</span>{{ count(lib.crate_size.get(crate.id, 0), "conversations") }}
+            </a>
+            {% if expanded %}
+            <ul class="nav-sublist" role="list" aria-label="Buckets in {{ crate.name }}">
+              {% for member in lib.members.get(crate.id, []) %}
+              <li><a class="nav-item nav-subitem" href="{{ url_for('inbox.bucket_workspace', bucket_id=member.id) }}" {{ bucket_drag(member, lib) }} data-drop="bucket"{% if member.shows_ai_name %} title="Mercury: {{ member.ai_name }}"{% endif %}{% if (selected_bucket and selected_bucket.id == member.id) %} aria-current="page"{% elif crate_filter and crate_filter.id == member.id %} aria-current="true"{% endif %}>
+                {{ icon("bucket") }}<span class="nav-label">{{ member.name }}</span>{% if member.meaning_updated %}<span class="meaning-dot"><span class="visually-hidden">Meaning updated</span></span>{% endif %}{{ count(lib.bucket_size.get(member.id, 0), "conversations") }}
+              </a></li>
+              {% else %}
+              <li class="nav-subempty">Empty · <a href="{{ url_for('buckets.organize') }}">add buckets</a></li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% set hidden_crates = lib.crates|length - lib.nav_crates|length %}
+        {% if not lib.crates|rejectattr("is_misc")|list %}
+        <p class="nav-hint nav-hint-quiet">Gather related buckets into a crate with <a href="{{ url_for('buckets.organize') }}">Edit</a>.</p>
+        {% elif not lib.crates_pinned and hidden_crates > 0 %}
+        <p class="nav-hint nav-hint-quiet" title="Star crates to pin them here">{{ icon("star", "icon-xs") }} Largest 3 · star to pin</p>
+        {% endif %}
+      </div>
+      <div class="nav-group nav-group-buckets">
+        <div class="nav-heading" data-drop="loose">
           <h2 class="nav-heading-text" id="buckets-heading">Buckets</h2>
           <a class="icon-btn icon-btn-sm" href="{{ url_for('buckets.create') }}" title="Create bucket">{{ icon("plus", "icon-sm") }}<span class="visually-hidden">Create bucket</span></a>
         </div>
-        {% if buckets %}
+        {% if lib.nav_buckets %}
         <ul class="nav-list" role="list" aria-labelledby="buckets-heading">
-          {% for bucket in buckets %}
-          <li><a class="nav-item" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) }}"{% if bucket.shows_ai_name %} title="Mercury: {{ bucket.ai_name }}"{% endif %}{% if selected_bucket and selected_bucket.id == bucket.id %} aria-current="page"{% endif %}>
-            {{ icon("folder") }}<span class="nav-label">{{ bucket.name }}</span>{% if bucket.meaning_updated %}<span class="meaning-dot"><span class="visually-hidden">Meaning updated</span></span>{% endif %}{{ count(counts.per_bucket.get(bucket.id, 0), "conversations") }}
+          {% for bucket in lib.nav_buckets %}
+          <li><a class="nav-item" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) }}" {{ bucket_drag(bucket, lib) }} data-drop="bucket"{% if bucket.shows_ai_name %} title="Mercury: {{ bucket.ai_name }}"{% endif %}{% if selected_bucket and selected_bucket.id == bucket.id %} aria-current="page"{% endif %}>
+            {{ icon("bucket") }}<span class="nav-label">{{ bucket.name }}</span>{% if bucket.meaning_updated %}<span class="meaning-dot"><span class="visually-hidden">Meaning updated</span></span>{% endif %}{{ count(lib.bucket_size.get(bucket.id, 0), "conversations") }}
           </a></li>
           {% endfor %}
         </ul>
-        {% else %}
+        {% set hidden_buckets = lib.buckets|length - lib.nav_buckets|length %}
+        {% if not lib.buckets_pinned and hidden_buckets > 0 %}
+        <p class="nav-hint nav-hint-quiet" title="Star buckets to pin them here">{{ icon("star", "icon-xs") }} Largest 3 · star to pin</p>
+        {% endif %}
+        {% elif not lib.buckets %}
         <p class="nav-hint">No categories yet. Suggestions appear after indexing, or <a href="{{ url_for('buckets.create') }}">create one</a>.</p>
         {% endif %}
+        {% if lib.hidden_count > 0 %}
+        <a class="nav-item nav-more" href="{{ url_for('buckets.organize') }}"><span class="nav-label">All crates &amp; buckets</span><span class="nav-more-count" title="{{ lib.hidden_count }} more in Edit">+{{ lib.hidden_count }}<span class="visually-hidden"> more</span></span></a>
+        {% endif %}
       </div>
+      </div>
+      {% endif %}
       <ul class="nav-list nav-list-secondary" role="list">
         <li><a class="nav-item" href="{{ url_for('buckets.rules') }}">{{ icon("funnel") }}<span class="nav-label">Sender rules</span></a></li>
         <li><a class="nav-item" href="{{ url_for('accounts.settings') }}">{{ icon("settings") }}<span class="nav-label">Settings</span></a></li>
@@ -83,22 +131,66 @@
     </div>
   </aside>
 
-  <section class="ws-list" aria-labelledby="list-title" data-list-region>
-    <header class="list-head">
+  {#- What the list holds, so a conversation dragged elsewhere can leave it in place (UUIDs only). -#}
+  {% if selected_crate %}
+    {% set list_kind = "crate" %}
+    {% set list_buckets = [crate_filter] if crate_filter else (library.members.get(selected_crate.id, []) if library else []) %}
+  {% elif selected_bucket %}
+    {% set list_kind, list_buckets = "bucket", [selected_bucket] %}
+  {% else %}
+    {% set list_kind, list_buckets = ("unsorted" if view == "unsorted" else "other"), [] %}
+  {% endif %}
+  <section class="ws-list" aria-labelledby="list-title" data-list-region data-list-kind="{{ list_kind }}" data-list-buckets="{{ list_buckets|map(attribute='id')|join(' ') }}">
+    <header class="list-head" data-list-head>
       <div class="list-title-row">
         <div class="list-title-wrap">
-          {% if selected_bucket %}<p class="eyebrow">Bucket</p>{% endif %}
-          <h1 class="list-title" id="list-title">{{ view_label }}</h1>
+          {% if selected_crate %}
+          <p class="eyebrow eyebrow-kind">{{ icon("crate", "icon-xs") }}<span>Crate</span>{% if selected_crate.is_misc %}<span class="eyebrow-note">· Automatic</span>{% endif %}</p>
+          {% elif selected_bucket %}
+          {% set in_crate = library.crate_of.get(selected_bucket.id) if library else None %}
+          <p class="eyebrow eyebrow-kind">{{ icon("bucket", "icon-xs") }}<span>Bucket</span>{% if in_crate %}<span class="eyebrow-in">in <a href="{{ url_for('inbox.crate_workspace', crate_id=in_crate.id) }}">{{ in_crate.name }}</a></span>{% endif %}</p>
+          {% endif %}
+          <h1 class="list-title" id="list-title"{% if selected_bucket and selected_bucket.shows_ai_name %} title="Mercury: {{ selected_bucket.ai_name }}"{% endif %}>{{ view_label }}</h1>
         </div>
         <div class="list-head-actions">
-          {% if selected_bucket %}
+          {% if selected_crate %}
+            {{ star_toggle("crate", selected_crate, next_path) }}
+            <a class="icon-btn" href="{{ url_for('buckets.organize') }}" title="Edit crates and buckets">{{ icon("pencil") }}<span class="visually-hidden">Edit crates and buckets</span></a>
+          {% elif selected_bucket %}
+            {{ star_toggle("bucket", selected_bucket, next_path) }}
+            {% if library %}{{ place_menu(selected_bucket, library, next_path, summary_icon="crate", summary_class="icon-btn") }}{% endif %}
             <a class="icon-btn" href="{{ url_for('buckets.edit', bucket_id=selected_bucket.id) }}" title="Rename or archive bucket">{{ icon("pencil") }}<span class="visually-hidden">Rename or archive bucket</span></a>
-            <a class="icon-btn" href="{{ url_for('buckets.merge', bucket_id=selected_bucket.id) }}" title="Merge bucket">{{ icon("merge") }}<span class="visually-hidden">Merge bucket</span></a>
           {% endif %}
           <button type="button" class="icon-btn js-only" data-shortcuts-open title="Keyboard shortcuts (?)">{{ icon("keyboard") }}<span class="visually-hidden">Keyboard shortcuts</span></button>
         </div>
       </div>
       {% if selected_bucket and selected_bucket.purpose %}<p class="list-purpose">{{ selected_bucket.purpose }}</p>{% endif %}
+      {% if selected_crate and library %}
+      {% set members = library.members.get(selected_crate.id, []) %}
+      <div class="crate-chips" data-drop="crate" data-crate-id="{{ selected_crate.id }}" data-name="{{ selected_crate.name }}">
+        <ul class="chip-list" role="list" aria-label="Buckets in {{ selected_crate.name }}">
+          <li><a class="chip" href="{{ url_for('inbox.crate_workspace', crate_id=selected_crate.id) }}"{% if not crate_filter %} aria-current="page"{% endif %}><span class="chip-label">All</span><span class="chip-count">{{ library.crate_size.get(selected_crate.id, 0) }}<span class="visually-hidden"> conversations</span></span></a></li>
+          {% for member in members %}
+          <li><a class="chip" href="{{ url_for('inbox.crate_workspace', crate_id=selected_crate.id, bucket=member.id) }}" {{ bucket_drag(member, library) }} data-drop="bucket"{% if crate_filter and crate_filter.id == member.id %} aria-current="page"{% endif %}>{{ icon("bucket", "icon-xs") }}<span class="chip-label">{{ member.name }}</span><span class="chip-count">{{ library.bucket_size.get(member.id, 0) }}<span class="visually-hidden"> conversations</span></span></a></li>
+          {% endfor %}
+          <li>
+            <details class="menu menu-start chip-add" data-menu data-focus-key="crate-add-{{ selected_crate.id }}">
+              <summary class="chip chip-ghost">{{ icon("plus", "icon-xs") }}<span class="chip-label">Add bucket</span></summary>
+              <div class="menu-pop">
+                <p class="menu-title">Add to {{ selected_crate.name }}</p>
+                {% for bucket in library.buckets if not library.crate_of.get(bucket.id) or library.crate_of.get(bucket.id).id != selected_crate.id %}
+                  {% set other = library.crate_of.get(bucket.id) %}
+                  {{ place_button(bucket, selected_crate.id, next_path, "bucket", bucket.name, "Added " ~ bucket.name ~ " to " ~ selected_crate.name, meta=("from " ~ other.name) if other else None) }}
+                {% else %}
+                <p class="menu-empty">Every bucket is already in this crate.</p>
+                {% endfor %}
+              </div>
+            </details>
+          </li>
+        </ul>
+        {% if crate_filter %}<p class="chip-note">Showing only {{ crate_filter.name }} · <a href="{{ url_for('inbox.bucket_workspace', bucket_id=crate_filter.id) }}">Open bucket</a></p>{% endif %}
+      </div>
+      {% endif %}
       {% if selected_bucket and (selected_bucket.shows_ai_name or split_from) %}
       <div class="list-meaning">
         {% if selected_bucket.shows_ai_name %}
@@ -106,7 +198,7 @@
           <summary>{{ icon("sparkle", "icon-xs") }}<span class="meaning-label">Mercury:</span> {{ selected_bucket.ai_name }}{% if selected_bucket.meaning_updated %} {{ badge("Meaning updated", "new") }}{% endif %}</summary>
           <div class="meaning-body">
             {% if selected_bucket.ai_purpose %}<p>{{ selected_bucket.ai_purpose }}</p>{% endif %}
-            <p class="meaning-note">Mercury keeps this description current as the bucket grows, splits, or merges. Your name stays as you set it.</p>
+            <p class="meaning-note">Mercury keeps this description current as the bucket grows or splits. Your name stays as you set it.</p>
             <form method="post" action="{{ url_for('buckets.follow_ai', bucket_id=selected_bucket.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-quiet btn-sm" type="submit">{{ icon("sparkle", "icon-sm") }} Use Mercury's name</button>
@@ -161,7 +253,7 @@
         {% endcall %}
       {% endif %}
       {% if not account.ai_consent or not config.AI_PROCESSING_ENABLED %}
-        {% if view in ["overview", "attention"] and not selected_bucket %}
+        {% if view in ["overview", "attention"] and not selected_bucket and not selected_crate %}
         {% call state("AI summaries are off", "neutral", "eye-off", compact=True) %}
           <p>{% if not account.ai_consent %}You chose not to send message text to an AI provider, so Mercury shows Gmail's preview text and relies on your buckets and sender rules.{% else %}AI processing is disabled for this Mercury instance. Organization and reading still work.{% endif %}</p>
         {% endcall %}
@@ -169,7 +261,7 @@
       {% endif %}
     </div>
 
-    {% if view == "overview" and not selected_bucket and counts.total %}
+    {% if view == "overview" and not selected_bucket and not selected_crate and counts.total %}
     <ul class="stat-grid" role="list" aria-label="Mailbox overview">
       <li><a class="stat" href="{{ url_for('inbox.workspace', view='attention') }}"><span class="stat-icon tone-action">{{ icon("flag") }}</span><span class="stat-num">{{ counts.attention }}</span><span class="stat-label">Possible actions</span></a></li>
       <li><div class="stat"><span class="stat-icon tone-unread">{{ icon("mail") }}</span><span class="stat-num">{{ counts.unread }}</span><span class="stat-label">Unread in Gmail</span></div></li>
@@ -187,8 +279,14 @@
       {% call empty("No conversations match that filter", "search") %}<p>The filter only searches conversations already loaded. Use “Show older conversations” to load more.</p>{% endcall %}
     </div>
     {% else %}
-      {% if selected_bucket %}
-        {% call empty("This bucket is empty", "folder") %}<p>Move conversations here from the reader or with bulk selection. Mercury keeps manual moves in place.</p>{% endcall %}
+      {% if selected_crate %}
+        {% if library and not library.members.get(selected_crate.id) %}
+        {% call empty("This crate is empty", "crate") %}<p>{% if selected_crate.is_misc %}Mercury files its small suggested buckets here automatically. {% endif %}Use “Add bucket” above, or <a href="{{ url_for('buckets.organize') }}">open Edit</a> to drag buckets in.</p>{% endcall %}
+        {% else %}
+        {% call empty("No conversations here yet", "crate") %}<p>{% if crate_filter %}{{ crate_filter.name }} has no indexed conversations yet.{% else %}The buckets in this crate have no indexed conversations yet.{% endif %}</p>{% endcall %}
+        {% endif %}
+      {% elif selected_bucket %}
+        {% call empty("This bucket is empty", "bucket") %}<p>Move conversations here from the reader, by dragging them onto a bucket, or with bulk selection. Mercury keeps manual moves in place.</p>{% endcall %}
       {% elif view == "attention" %}
         {% call empty("Nothing needs attention", "check-circle") %}<p>No open possible actions. Mercury flags actions conservatively; anything it's unsure about stays unflagged.</p>{% endcall %}
       {% elif view == "unsorted" %}

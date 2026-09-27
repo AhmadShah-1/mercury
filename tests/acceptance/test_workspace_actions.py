@@ -8,7 +8,7 @@ from mercury.inbox.models import EmailThread, ThreadAnalysis
 from tests.conftest import csrf_token
 
 
-def test_workspace_bucket_move_action_and_reviewed_merge(app, client, connected):
+def test_workspace_bucket_move_action_and_reversible_crate(app, client, connected):
     create_page = client.get("/app/buckets/new")
     created = client.post(
         "/app/buckets/new",
@@ -64,26 +64,28 @@ def test_workspace_bucket_move_action_and_reviewed_merge(app, client, connected)
         destination = db.session.scalar(select(Bucket).where(Bucket.name == "Purchases"))
         source_id, destination_id = source.id, destination.id
 
-    merge_page = client.get(f"/app/buckets/{source_id}/merge")
-    assert b"1 thread" in merge_page.data
-    merge_token = csrf_token(merge_page)
-    preview_only = client.post(
-        f"/app/buckets/{source_id}/merge",
-        data={"destination_id": str(destination_id), "csrf_token": merge_token},
-    )
-    assert preview_only.status_code == 200
-    with app.app_context():
-        assert db.session.get(Bucket, source_id).archived is False
-
-    merged = client.post(
-        f"/app/buckets/{source_id}/merge",
-        data={
-            "destination_id": str(destination_id),
-            "confirm": "y",
-            "csrf_token": merge_token,
-        },
+    # Combining buckets now makes a crate: nothing is archived or reassigned, and it undoes.
+    token = csrf_token(client.get(f"/app/buckets/{source_id}"))
+    crated = client.post(
+        f"/app/buckets/{source_id}/crate",
+        data={"crate_id": "new", "with_bucket_id": str(destination_id), "csrf_token": token},
         follow_redirects=False,
     )
-    assert merged.status_code == 302
+    assert crated.status_code == 303
     with app.app_context():
-        assert db.session.get(Bucket, source_id).archived is True
+        source = db.session.get(Bucket, source_id)
+        crate_id = source.crate_id
+        assert source.archived is False
+        assert db.session.get(Bucket, destination_id).crate_id == crate_id
+    crate_page = client.get(f"/app/crates/{crate_id}")
+    assert crate_page.status_code == 200
+    assert b"Monthly statement notice" in crate_page.data
+    assert b"Your order has shipped" in crate_page.data
+
+    dissolved = client.post(
+        f"/app/crates/{crate_id}/dissolve", data={"csrf_token": token}, follow_redirects=False
+    )
+    assert dissolved.status_code == 303
+    with app.app_context():
+        assert db.session.get(Bucket, source_id).crate_id is None
+        assert db.session.get(Bucket, destination_id).crate_id is None

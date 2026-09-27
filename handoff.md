@@ -26,6 +26,8 @@ before changing code and preserve the user's scope exclusions.
 | UI agent (Claude subagent) | Quicksilver UI/UX rework + Playwright flow | see slice B | **Complete** 2026-09-26 — released |
 | Codex | Real-mail bucket discovery, naming budget, paused-analysis recovery, truthful progress | see session 3 slice | **Complete** 2026-09-26 — verified offline |
 | Next agent | Live-provider smoke tests (needs credentials) or remaining items under "Highest-priority remaining work" | Claim before editing | Unclaimed |
+| Lead (Claude, session 4) | Crates (replace destructive merge), favorites, Misc auto-filing — backend | `mercury/buckets/{models,crates,service,routes,forms,discovery,organize}.py`, `mercury/inbox/routes.py`, `mercury/accounts/service.py`, `mercury/integrations/google/oauth.py`, `mercury/commands.py`, new migration, bucket/crate tests | **Active** 2026-09-27 |
+| UI agent (Claude subagent, session 4) | Crates UI: icons, sidebar, crate view, Organize board, drag-and-drop | `mercury/templates/**`, `mercury/static/css/mercury.css`, `mercury/static/js/*.js` | **Complete** 2026-09-27 — released |
 
 ## Current outcome
 
@@ -299,3 +301,56 @@ Items 1–8 from session 1 are done (slice A/B). Remaining:
 - Do not claim Google approval, production readiness, an assessment result, or verified provider
   pricing.
 - The worktree contains intentional uncommitted changes. Do not run destructive Git commands.
+
+## Session 4 — crates, favorites, Misc (lead: backend; UI agent: frontend), 2026-09-27
+
+Product decision by the user: the destructive "merge into another bucket" is **replaced** by
+non-destructive **crates**. This consciously departs from the spec's merge wording (§9, §13
+"merge moves members, rules, and label mappings") and from "defer drag-and-drop". The user asked
+for both explicitly. Scope was kept inside the spec's intent: crates are one level only (no
+nested bucket trees), never own threads (one primary bucket per thread is unchanged), and every
+drag action also has a plain CSRF form for keyboard/no-JS use.
+
+Backend (lead):
+- `Crate` model and `buckets.crate_id` / `crate_origin` (`auto`/`user`/NULL) / `favorite`;
+  migration `5d1e8c3a9f42` (composite owner FK bucket→crate, partial unique index = one Misc per
+  account, backfill: Misc for every account, user-made buckets marked `user`, small suggested
+  buckets filed into Misc). Downgrade→upgrade rehearsed, backfill verified on seeded rows, and
+  `flask db check` is clean.
+- `mercury/buckets/crates.py`: owner-scoped place/create/rename/favorite/dissolve/combine, empty
+  user crates auto-deleted, `file_small_buckets` (judged once; graduates at 15; SQL-guarded so a
+  concurrent user placement wins), `build_library` (per-section favorites, else top 3; the
+  selected crate is expanded).
+- Organize pass step 6 files small buckets; a split child inherits a user-chosen crate; Misc is
+  created on connect (fake + Google); archive releases a bucket's crate.
+- Routes: `GET /app/crates/<id>[?bucket=]`, `GET /app/organize`, `POST /app/buckets/<id>/crate`,
+  `/favorite`, `POST /app/crates`, `/app/crates/<id>/{rename,favorite,dissolve,combine}`; `next`
+  redirects are restricted to local `/app` paths; `X-Mercury-Quiet: 1` suppresses flashes.
+  Removed: merge route/form/service/template.
+- Tests: new `tests/integration/test_crates.py`; merge tests replaced in
+  `test_bucket_organization.py` and `test_workspace_actions.py`; cross-user crate/placement
+  checks in `test_ownership.py`; deletion now asserts no buckets/crates remain.
+- Environment note: at ~12:14 local someone ran `docker compose down`, which removed the dev
+  `db`/`web`/`worker` containers (volume `mercury_mercury_pgdata` intact). The stale test-db
+  container was recreated (tmpfs). Dev stack must be restarted with `make dev`, then
+  `flask db upgrade` applies `5d1e8c3a9f42` to the dev database.
+- Independent review fixes (backend): a no-change placement keeps Mercury's `auto` filing;
+  Undo may send `restore=auto` (accepted only for suggested buckets returning to Misc or no
+  crate); quiet/bulk requests (`X-Mercury-Quiet` / `X-Mercury-Bulk`) now answer 204 instead of
+  a redirect so a sign-in redirect is never mistaken for success; the migration treats
+  `merged_at` buckets as user-curated; split-child crate inheritance is guarded against a crate
+  deleted mid-pass. Frontend review items (stale CSRF meta after in-place refresh, drag state
+  after a swap, strict success/refresh checks, Esc over the confirm dialog, "Show older" pages
+  lost on refresh) were handed to the UI agent; see its note for which landed.
+- Verified before the wrap-up: ruff/format/bandit/`git diff --check` clean; full suite 148
+  passed + new tests (crate integration, acceptance, regression); both browser flows (demo +
+  new drag-and-drop crate flow) passed against a local fake-mode server. The final re-run after
+  the last UI fixes was skipped at the user's request.
+
+### Session 4 — UI agent (frontend), verified 2026-09-27
+
+- New icons (`bucket` pail, `crate`, `star`, `star-filled`, `grip`, `take-out`, `more`; `move` now a pail); folder removed wherever a bucket is meant. Sidebar has Crates (with a labelled **Edit** link) above Buckets, the expanded crate's members nested, "Largest 3 · star to pin" hints, and an "All crates & buckets +N" link. Crate view: star, member chips (All/filter), "Add bucket" menu. Bucket view: star, crate menu, "in <crate>" eyebrow; no merge link anywhere.
+- New `templates/buckets/organize.html` (tray of loose buckets, crate cards, Misc "Automatic" note, dashed New-crate card with a no-JS form) and shared macros in `templates/components/crates.html`. Every action is a plain CSRF POST form (`<details>` menus, edit-page select); drag is only a shortcut.
+- New `static/js/organize.js` (loaded after mercury.js): HTML5 drag and drop (rows → sidebar bucket/chip; bucket → crate/new crate/loose tile/"Buckets" heading; crate → crate), `data-org-form` posts with `X-Mercury-Quiet`, htmx region refresh (`[data-org-board]`, `[data-ws-nav]`, `[data-list-region]`) with scroll/filter/focus restore, Undo toasts for simple bucket moves. mercury.js gained a toast action button and a frozen `window.MercuryUI.showToast`. base.html sets htmx `attributesToSettle` without `style`.
+- Verified on `mercury_test_ui`: full suite 148 passed, 1 skipped; `tests/browser` against a local fake server on 127.0.0.1:5055 passed; scripted Playwright drags on the board and sidebar, a no-JS pass, a keyboard pass, and light/dark/390px screenshots (no console/CSP errors, no horizontal scroll). The `test-db` container had exited (code 255); only that container was restarted with `docker start`.
+- Review follow-up (same day): JS success is 2xx only (quiet endpoints answer 204); refresh copies the fresh CSRF meta, reloads on 400/redirect/missing region instead of swapping; dragend is bound to the source and foreign drags are ignored; Esc leaves an open confirm dialog alone; thread drags update rows in place and refresh only the nav (new `data-list-head`, `data-list-kind`, `data-list-buckets` hooks); Undo sends `restore=auto` for Mercury-filed buckets. Verified: acceptance + crate tests 42 passed, `tests/browser` 2 passed, scripted failure-path checks passed.

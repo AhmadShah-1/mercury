@@ -11,12 +11,57 @@ from sqlalchemy import (
     Index,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from mercury.accounts.models import utcnow
 from mercury.extensions import db
+
+
+class Crate(db.Model):
+    """A user-arranged group of buckets, shown as one list. It never owns conversations.
+
+    Every thread still has exactly one bucket; a crate only gathers buckets for navigation, so
+    grouping and ungrouping never changes a placement or what Mercury learns from it.
+    """
+
+    __tablename__ = "crates"
+    __table_args__ = (
+        UniqueConstraint("gmail_account_id", "name", name="uq_crate_account_name"),
+        UniqueConstraint("id", "user_id", "gmail_account_id", name="uq_crate_owner_account"),
+        ForeignKeyConstraint(
+            ["gmail_account_id", "user_id"],
+            ["gmail_accounts.id", "gmail_accounts.user_id"],
+            name="fk_crate_account_owner",
+            ondelete="CASCADE",
+        ),
+        # Exactly one Misc crate per account: the destination for small suggested buckets.
+        Index(
+            "uq_crate_account_misc",
+            "gmail_account_id",
+            unique=True,
+            postgresql_where=text("kind = 'misc'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    gmail_account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
+    favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    @property
+    def is_misc(self) -> bool:
+        return self.kind == "misc"
 
 
 class Bucket(db.Model):
@@ -31,6 +76,12 @@ class Bucket(db.Model):
             ondelete="CASCADE",
         ),
         Index("ix_bucket_owner_active", "user_id", "archived"),
+        # The crate must belong to the same owner and account as the bucket.
+        ForeignKeyConstraint(
+            ["crate_id", "user_id", "gmail_account_id"],
+            ["crates.id", "crates.user_id", "crates.gmail_account_id"],
+            name="fk_bucket_crate_owner",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -60,8 +111,13 @@ class Bucket(db.Model):
     split_from_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("buckets.id", ondelete="SET NULL")
     )
-    # A user merge is a deliberate grouping; automatic splitting never undoes it.
+    # Set by the retired destructive merge; such buckets are still never split automatically.
     merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    crate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    # Who last decided this bucket's crate: "auto" (Mercury's Misc filing), "user", or None
+    # (not decided yet). Mercury never moves a bucket the user placed.
+    crate_origin: Mapped[str | None] = mapped_column(String(8))
+    favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     @property
     def shows_ai_name(self) -> bool:

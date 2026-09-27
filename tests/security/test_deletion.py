@@ -1,6 +1,7 @@
 from sqlalchemy import func, select
 
 from mercury.accounts.models import GmailAccount, SecurityAuditEvent, User
+from mercury.buckets.models import Bucket, Crate
 from mercury.extensions import db
 from mercury.inbox.models import EmailThread
 from tests.conftest import csrf_token
@@ -18,6 +19,8 @@ def test_disconnect_removes_tokens_and_all_mailbox_derived_records(app, client, 
         assert db.session.scalar(select(User)) is not None
         assert db.session.scalar(select(GmailAccount)) is None
         assert db.session.scalar(select(func.count()).select_from(EmailThread)) == 0
+        assert db.session.scalar(select(func.count()).select_from(Bucket)) == 0
+        assert db.session.scalar(select(func.count()).select_from(Crate)) == 0
         event = db.session.scalar(
             select(SecurityAuditEvent).where(SecurityAuditEvent.event_type == "gmail_disconnected")
         )

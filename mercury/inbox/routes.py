@@ -18,8 +18,9 @@ from flask_login import current_user, login_required
 from sqlalchemy import and_, func, or_, select
 
 from mercury.accounts.forms import EmptyForm
+from mercury.buckets.crates import build_library, owned_crate
 from mercury.buckets.forms import ActionForm, MoveThreadForm
-from mercury.buckets.models import Bucket, BucketAssignment
+from mercury.buckets.models import Bucket, BucketAssignment, Crate
 from mercury.buckets.service import active_buckets, move_thread
 from mercury.extensions import db
 from mercury.inbox.models import EmailThread, MessageReference, ProcessingRun, ThreadAnalysis
@@ -99,6 +100,7 @@ def _workspace_query(
     bucket_id: uuid.UUID | None = None,
     view: str = "overview",
     cursor: tuple[datetime, uuid.UUID] | None = None,
+    crate_id: uuid.UUID | None = None,
 ):
     """One page (plus one row to detect more) in newest-first keyset order.
 
@@ -137,6 +139,9 @@ def _workspace_query(
                 and_(EmailThread.latest_message_at == latest, EmailThread.id > thread_id),
             )
         )
+    if crate_id:
+        # A crate lists its active buckets' conversations together, as one list.
+        query = query.where(Bucket.crate_id == crate_id, Bucket.archived.is_(False))
     if bucket_id:
         query = query.where(Bucket.id == bucket_id, Bucket.user_id == current_user.id)
     elif view == "attention":
@@ -201,13 +206,23 @@ def _split_parent(bucket: Bucket | None) -> Bucket | None:
     )
 
 
-def _render_workspace(*, rows, selected_bucket=None, view: str = "overview", paged=False):
+def _render_workspace(
+    *,
+    rows,
+    selected_bucket=None,
+    selected_crate: Crate | None = None,
+    crate_filter: Bucket | None = None,
+    view: str = "overview",
+    paged=False,
+):
     page_size = current_app.config["INBOX_PAGE_SIZE"]
     rows, more = rows[:page_size], len(rows) > page_size
     more_url = None
     if more:
         args = dict(request.view_args or {})
-        if selected_bucket is None and view != "overview":
+        if crate_filter is not None:
+            args["bucket"] = crate_filter.id
+        elif selected_bucket is None and selected_crate is None and view != "overview":
             args["view"] = view
         more_url = url_for(request.endpoint, before=_cursor_for(rows[-1][0]), **args)
     if paged and _is_htmx():
@@ -219,20 +234,40 @@ def _render_workspace(*, rows, selected_bucket=None, view: str = "overview", pag
             account=current_user.gmail_account,
         )
     buckets = active_buckets(current_user.id)
+    connected = current_user.gmail_account is not None
+    counts = _workspace_counts(current_user.id) if connected else None
+    if selected_crate is not None:
+        view_label = selected_crate.name
+    else:
+        view_label = selected_bucket.name if selected_bucket else WORKSPACE_VIEWS[view]
     return render_template(
         "inbox/workspace.html",
         rows=rows,
         more_url=more_url,
         paged=paged,
         buckets=buckets,
+        library=(
+            build_library(
+                current_user.id,
+                buckets=buckets,
+                sizes=counts["per_bucket"],
+                selected_bucket=selected_bucket,
+                selected_crate=selected_crate,
+            )
+            if connected
+            else None
+        ),
         selected_bucket=selected_bucket,
+        selected_crate=selected_crate,
+        crate_filter=crate_filter,
+        next_path=request.full_path.rstrip("?"),
         view=view,
-        view_label=selected_bucket.name if selected_bucket else WORKSPACE_VIEWS[view],
+        view_label=view_label,
         split_from=_split_parent(selected_bucket),
         updates_since=int(datetime.now(UTC).timestamp()),
         views=WORKSPACE_VIEWS,
-        counts=_workspace_counts(current_user.id) if current_user.gmail_account else None,
-        latest_run=_latest_run(current_user.id) if current_user.gmail_account else None,
+        counts=counts,
+        latest_run=_latest_run(current_user.id) if connected else None,
         sync_form=EmptyForm(),
         move_form=EmptyForm(),
     )
@@ -262,6 +297,39 @@ def bucket_workspace(bucket_id):
     return _render_workspace(
         rows=_workspace_query(bucket_id, cursor=cursor),
         selected_bucket=bucket,
+        paged=cursor is not None,
+    )
+
+
+@bp.get("/app/crates/<uuid:crate_id>")
+@login_required
+def crate_workspace(crate_id):
+    """Every conversation in a crate's buckets as one list, optionally narrowed to one bucket."""
+    crate = owned_crate(current_user.id, crate_id)
+    if crate is None:
+        abort(404)
+    crate_filter = None
+    try:
+        member_id = uuid.UUID(request.args.get("bucket", ""))
+    except ValueError:
+        member_id = None
+    if member_id is not None:
+        # Only a member of this same crate narrows the list; any other ID shows the whole crate.
+        crate_filter = db.session.scalar(
+            select(Bucket).where(
+                Bucket.id == member_id,
+                Bucket.user_id == current_user.id,
+                Bucket.crate_id == crate.id,
+                Bucket.archived.is_(False),
+            )
+        )
+    cursor = _parse_cursor(request.args.get("before"))
+    return _render_workspace(
+        rows=_workspace_query(
+            crate_filter.id if crate_filter else None, cursor=cursor, crate_id=crate.id
+        ),
+        selected_crate=crate,
+        crate_filter=crate_filter,
         paged=cursor is not None,
     )
 
@@ -388,9 +456,11 @@ def move(thread_id):
             thread_id=thread_id,
             bucket_id=bucket_id,
         )
-    if request.headers.get("X-Mercury-Bulk") != "1":
-        # Bulk moves show one summary toast client-side instead of one flash per thread.
-        flash("Conversation moved. Mercury will keep it there.", "success")
+    if request.headers.get("X-Mercury-Bulk") == "1":
+        # Bulk and drag moves show one summary toast client-side instead of one flash per
+        # thread; 204 (never a redirect) lets the script tell success from a sign-in redirect.
+        return "", 204
+    flash("Conversation moved. Mercury will keep it there.", "success")
     return redirect(url_for("inbox.thread_reader", thread_id=thread_id))
 
 

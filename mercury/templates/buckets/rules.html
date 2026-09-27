@@ -45,7 +45,7 @@
           {% for rule in rules %}
           <tr>
             <td class="mono">{{ rule.sender_address }}</td>
-            <td>{% if bucket_names.get(rule.bucket_id|string) %}{{ badge(bucket_names.get(rule.bucket_id|string), "bucket", "folder") }}{% else %}{{ badge("Archived bucket", "muted", "eye-off") }}{% endif %}</td>
+            <td>{% if bucket_names.get(rule.bucket_id|string) %}{{ badge(bucket_names.get(rule.bucket_id|string), "bucket", "bucket") }}{% else %}{{ badge("Archived bucket", "muted", "eye-off") }}{% endif %}</td>
             <td>{% if rule.enabled %}{{ badge("Active", "success", "check") }}{% else %}{{ badge("Paused", "neutral", "pause") }}{% endif %}</td>
           </tr>
           {% endfor %}

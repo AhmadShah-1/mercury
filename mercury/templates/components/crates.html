@@ -1,0 +1,87 @@
+{#- Crate and bucket controls shared by the workspace, the Organize board, and the edit page.
+    Every control is an ordinary CSRF-protected POST form so it works without JavaScript;
+    mercury/static/js/organize.js enhances forms marked `data-org-form` (fetch + region refresh)
+    and adds drag and drop. Names are autoescaped text; data-* attributes carry only kinds,
+    UUIDs, endpoint URLs, and escaped display names for toasts. -#}
+{% from "components/icons.html" import icon %}
+{% from "components/ui.html" import csrf_input %}
+
+{% macro next_input(next) -%}
+{%- if next %}<input type="hidden" name="next" value="{{ next }}">{% endif -%}
+{%- endmacro %}
+
+{#- Star toggle for a bucket or a crate. aria-pressed carries the state; the name stays stable. -#}
+{% macro star_toggle(kind, item, next=None, small=False) -%}
+{%- set on = item.favorite -%}
+<form class="star-form" method="post" action="{{ url_for('buckets.favorite', bucket_id=item.id) if kind == 'bucket' else url_for('buckets.crate_favorite', crate_id=item.id) }}" data-org-form data-toast="{{ ('Unstarred ' ~ item.name) if on else ('Starred ' ~ item.name ~ ' · pinned in the sidebar') }}">
+  {{ csrf_input() }}
+  <input type="hidden" name="favorite" value="{{ '0' if on else '1' }}">
+  {{ next_input(next) }}
+  <button class="icon-btn star-btn{% if small %} icon-btn-sm{% endif %}{% if on %} is-on{% endif %}" type="submit" aria-pressed="{{ 'true' if on else 'false' }}" title="{{ 'Starred · pinned in the sidebar' if on else 'Star to pin in the sidebar' }}" data-focus-key="star-{{ kind }}-{{ item.id }}">
+    {{- icon("star-filled" if on else "star", "icon-sm" if small else "") -}}
+    <span class="visually-hidden">Star {{ item.name }}</span>
+  </button>
+</form>
+{%- endmacro %}
+
+{#- One POST button that places a bucket: crate_id is a crate UUID, "" (take out), or "new". -#}
+{% macro place_button(bucket, crate_id, next, icon_name, label, toast, meta=None) -%}
+<form class="menu-form" method="post" action="{{ url_for('buckets.place', bucket_id=bucket.id) }}" data-org-form data-toast="{{ toast }}">
+  {{ csrf_input() }}
+  <input type="hidden" name="crate_id" value="{{ crate_id }}">
+  {{ next_input(next) }}
+  <button class="menu-item" type="submit">{{ icon(icon_name, "icon-sm") }}<span class="menu-item-label">{{ label }}</span>{% if meta %}<span class="menu-item-meta">{{ meta }}</span>{% endif %}</button>
+</form>
+{%- endmacro %}
+
+{#- Keyboard/no-JS menu that moves a bucket into another crate, a new crate, or out of its crate. -#}
+{% macro place_menu(bucket, library, next, summary_icon="move", summary_class="icon-btn icon-btn-sm", align="end") -%}
+{%- set current = library.crate_of.get(bucket.id) -%}
+<details class="menu menu-{{ align }}" data-menu data-focus-key="place-{{ bucket.id }}">
+  <summary class="{{ summary_class }}" title="{{ 'Move to another crate' if current else 'Put in a crate' }}">
+    {{- icon(summary_icon, "icon-sm" if "icon-btn-sm" in summary_class else "") -}}
+    <span class="visually-hidden">Move {{ bucket.name }} to a crate</span>
+  </summary>
+  <div class="menu-pop">
+    <p class="menu-title">{% if current %}In {{ current.name }} · move to{% else %}Put {{ bucket.name }} in{% endif %}</p>
+    {% for crate in library.crates if not current or crate.id != current.id %}
+      {{ place_button(bucket, crate.id, next, "crate", crate.name, "Added " ~ bucket.name ~ " to " ~ crate.name) }}
+    {% endfor %}
+    <form class="menu-form menu-new" method="post" action="{{ url_for('buckets.place', bucket_id=bucket.id) }}" data-org-form data-toast="Made a new crate for {{ bucket.name }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="crate_id" value="new">
+      {{ next_input(next) }}
+      <label class="visually-hidden" for="new-crate-{{ bucket.id }}-{{ summary_icon }}">Name for a new crate (optional)</label>
+      <input class="form-control form-control-sm" id="new-crate-{{ bucket.id }}-{{ summary_icon }}" name="name" maxlength="80" autocomplete="off" placeholder="Name (optional)">
+      <button class="btn btn-quiet btn-sm" type="submit">{{ icon("plus", "icon-sm") }} New crate</button>
+    </form>
+    {% if current %}
+    <div class="menu-sep" role="presentation"></div>
+    {{ place_button(bucket, "", next, "take-out", "Take out of " ~ current.name, "Took " ~ bucket.name ~ " out of " ~ current.name) }}
+    {% endif %}
+  </div>
+</details>
+{%- endmacro %}
+
+{#- Attributes that make an element a draggable bucket (the organize script reads them). -#}
+{% macro bucket_drag(bucket, library) -%}
+{%- set current = library.crate_of.get(bucket.id) -%}
+draggable="true" data-drag="bucket" data-bucket-id="{{ bucket.id }}" data-place-url="{{ url_for('buckets.place', bucket_id=bucket.id) }}" data-name="{{ bucket.name }}" data-crate-id="{{ current.id if current else '' }}" data-crate-origin="{{ bucket.crate_origin or '' }}"
+{%- if current %} data-crate-name="{{ current.name }}" data-crate-keeps="{{ '1' if current.is_misc or library.members.get(current.id, [])|length > 1 else '0' }}"{% endif -%}
+{%- endmacro %}
+
+{#- A bucket tile on the Organize board. -#}
+{% macro bucket_tile(bucket, library, next) -%}
+{%- set current = library.crate_of.get(bucket.id) -%}
+{%- set size = library.bucket_size.get(bucket.id, 0) -%}
+<li class="tile{% if bucket.favorite %} is-starred{% endif %}" {{ bucket_drag(bucket, library) }} data-drop="tile" data-focus-key="tile-{{ bucket.id }}">
+  <span class="tile-grip js-only" aria-hidden="true">{{ icon("grip", "icon-sm") }}</span>
+  <span class="tile-icon" aria-hidden="true">{{ icon("bucket", "icon-sm") }}</span>
+  <a class="tile-name" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) }}" draggable="false"{% if bucket.shows_ai_name %} title="Mercury: {{ bucket.ai_name }}"{% endif %}>{{ bucket.name }}</a>
+  <span class="tile-count" title="{{ size }} {{ 'conversation' if size == 1 else 'conversations' }}">{{ size }}<span class="visually-hidden"> {{ "conversation" if size == 1 else "conversations" }}</span></span>
+  <span class="tile-actions">
+    {{ star_toggle("bucket", bucket, next, small=True) }}
+    {{ place_menu(bucket, library, next) }}
+  </span>
+</li>
+{%- endmacro %}

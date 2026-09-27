@@ -1,15 +1,19 @@
-"""Automatic organization: filing new mail, pruning misfits, splitting, merging, and naming."""
+"""Automatic organization: filing new mail, pruning misfits, splitting, crating, and naming."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import numpy as np
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from mercury.accounts.models import GmailAccount
-from mercury.buckets.models import Bucket, BucketAssignment
+from mercury.buckets.crates import create_crate
+from mercury.buckets.discovery import _join_crate
+from mercury.buckets.models import Bucket, BucketAssignment, Crate
 from mercury.buckets.organize import organize_account
-from mercury.buckets.service import merge_buckets, rename_bucket
+from mercury.buckets.service import rename_bucket
 from mercury.extensions import db
 from tests.bucket_vectors import add_thread, assign, bucket_of, make_bucket, near, topic
 
@@ -83,22 +87,25 @@ def test_misfit_model_placements_return_to_unsorted_but_manual_and_rule_ones_sta
     assert bucket_of(stray_rule) == jobs.id
 
 
-def test_future_mail_follows_a_merge_by_id_even_after_renaming(account):
+def test_future_mail_still_files_into_a_crated_bucket_by_id_even_after_renaming(account):
     jobs = make_bucket(account, "Job Opportunities")
     loans = make_bucket(account, "Student Loan Offers")
     _populate(account, jobs, JOBS, 5, seed=6)
     _populate(account, loans, LOANS, 5, seed=7)
 
-    merge_buckets(account.user_id, jobs.id, loans.id)
-    rename_bucket(account.user_id, loans.id, "Career and Finance", "")
+    crate = create_crate(account.user_id, [jobs.id, loans.id], "Career and Finance")
+    rename_bucket(account.user_id, jobs.id, "Careers", "")
     new_job_mail = add_thread(account, near(JOBS, np.random.default_rng(8)))
+    new_loan_mail = add_thread(account, near(LOANS, np.random.default_rng(8)))
     organize_account(account)
 
-    destination = db.session.get(Bucket, loans.id)
-    assert bucket_of(new_job_mail) == loans.id
-    assert db.session.get(Bucket, jobs.id).archived is True
-    assert destination.name == "Career and Finance"
-    assert destination.merged_at is not None
+    # A crate never blends its buckets: each keeps its own identity, members, and matches.
+    assert bucket_of(new_job_mail) == jobs.id
+    assert bucket_of(new_loan_mail) == loans.id
+    for bucket_id in (jobs.id, loans.id):
+        bucket = db.session.get(Bucket, bucket_id)
+        assert bucket.archived is False and bucket.crate_id == crate.id
+    assert db.session.get(Bucket, jobs.id).name == "Careers"
 
 
 def test_bucket_splits_when_members_separate_and_manual_placements_stay(account):
@@ -120,17 +127,58 @@ def test_bucket_splits_when_members_separate_and_manual_placements_stay(account)
     assert parent.meaning_stale is False and parent.ai_named_at is not None
 
 
-def test_merged_buckets_are_not_split_back_apart(account):
+def test_buckets_from_the_retired_merge_are_still_not_split_back_apart(account):
     jobs = make_bucket(account, "Job Opportunities")
-    loans = make_bucket(account, "Student Loan Offers")
     _populate(account, jobs, JOBS, 12, seed=12)
-    _populate(account, loans, LOANS, 12, seed=13)
-    merge_buckets(account.user_id, jobs.id, loans.id)
+    _populate(account, jobs, LOANS, 12, seed=13)
+    jobs.merged_at = datetime.now(UTC)
+    db.session.commit()
 
     counts = organize_account(account)
 
     assert counts["split"] == 0
-    assert db.session.scalar(select(Bucket).where(Bucket.split_from_id == loans.id)) is None
+    assert db.session.scalar(select(Bucket).where(Bucket.split_from_id == jobs.id)) is None
+
+
+def test_a_split_off_topic_stays_in_the_crate_the_user_chose(account):
+    mixed = make_bucket(account, "Opportunities", ai_name="Opportunities")
+    _populate(account, mixed, JOBS, 12, seed=9)
+    _populate(account, mixed, LOANS, 12, seed=11, subject="Statement payment due")
+    crate = create_crate(account.user_id, [mixed.id], "Admin")
+
+    counts = organize_account(account)
+
+    assert counts["split"] == 1
+    child = db.session.scalar(select(Bucket).where(Bucket.split_from_id == mixed.id))
+    assert (child.crate_id, child.crate_origin) == (crate.id, "user")
+
+
+def test_a_split_off_topic_stays_loose_if_its_crate_was_removed_meanwhile(account):
+    mixed = make_bucket(account, "Opportunities", ai_name="Opportunities")
+    crate = create_crate(account.user_id, [mixed.id], "Admin")
+    orphan = make_bucket(account, "Orphan")
+
+    # The crate disappears after the pass read the parent (e.g. during the naming call).
+    db.session.execute(update(Bucket).where(Bucket.id == mixed.id).values(crate_id=None))
+    db.session.execute(delete(Crate).where(Crate.id == crate.id))
+    db.session.commit()
+    _join_crate(orphan, crate.id)
+
+    assert db.session.get(Bucket, orphan.id).crate_id is None
+
+
+def test_organizing_files_mercurys_small_new_buckets_into_misc(account):
+    small = make_bucket(account, "Small Topic")
+    _populate(account, small, JOBS, 4, seed=16)
+    large = make_bucket(account, "Large Topic")
+    _populate(account, large, LOANS, 16, seed=17)
+
+    counts = organize_account(account)
+
+    misc = db.session.scalar(select(Crate).where(Crate.kind == "misc"))
+    assert counts["crated"] == 1
+    assert db.session.get(Bucket, small.id).crate_id == misc.id
+    assert db.session.get(Bucket, large.id).crate_id is None
 
 
 def test_display_name_follows_mercury_until_the_user_renames(account):

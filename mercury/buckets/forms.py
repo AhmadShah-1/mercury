@@ -1,6 +1,6 @@
 from flask_wtf import FlaskForm
-from wtforms import BooleanField, SelectField, StringField, SubmitField
-from wtforms.validators import DataRequired, Length
+from wtforms import BooleanField, SelectField, SelectMultipleField, StringField, SubmitField
+from wtforms.validators import AnyOf, DataRequired, Length, Optional
 
 
 class BucketForm(FlaskForm):
@@ -30,7 +30,27 @@ class SenderRuleForm(FlaskForm):
     submit = SubmitField("Save rule")
 
 
-class MergeForm(FlaskForm):
-    destination_id = SelectField("Merge into", choices=[], validators=[DataRequired()])
-    confirm = BooleanField("I reviewed the affected thread count", validators=[DataRequired()])
-    submit = SubmitField("Merge buckets")
+class PlaceBucketForm(FlaskForm):
+    # "" takes the bucket out of its crate; "new" starts a crate. Choices are the owner's crates.
+    crate_id = SelectField("Crate", choices=[], validate_choice=True)
+    with_bucket_id = SelectField("With bucket", choices=[], validators=[Optional()])
+    name = StringField("Crate name", validators=[Optional(), Length(max=80)])
+    # Only Undo sends this, to hand a bucket Mercury had filed back to automatic filing.
+    restore = StringField("Restore", validators=[Optional(), AnyOf(["auto"])])
+
+
+class FavoriteForm(FlaskForm):
+    favorite = StringField("Favorite", validators=[AnyOf(["0", "1"])])
+
+
+class NewCrateForm(FlaskForm):
+    name = StringField("Crate name", validators=[Optional(), Length(max=80)])
+    bucket_ids = SelectMultipleField("Buckets", choices=[], validators=[DataRequired()])
+
+
+class RenameCrateForm(FlaskForm):
+    name = StringField("Crate name", validators=[DataRequired(), Length(min=1, max=80)])
+
+
+class CombineCratesForm(FlaskForm):
+    target_id = SelectField("Combine into", choices=[], validators=[DataRequired()])

@@ -7,13 +7,16 @@ mailbox by disconnecting it first, so never point it at a server holding data yo
 
 from __future__ import annotations
 
-import os
 import re
-from urllib.parse import urlparse
 
 import pytest
 
-BASE_URL = os.environ.get("MERCURY_BROWSER_BASE_URL", "").rstrip("/")
+from tests.browser.flows import (
+    BASE_URL,
+    connect_synthetic_mailbox,
+    disconnect_if_connected,
+    login,
+)
 
 pytestmark = [
     pytest.mark.skipif(not BASE_URL, reason="set MERCURY_BROWSER_BASE_URL to run browser flows"),
@@ -22,73 +25,17 @@ pytestmark = [
     pytest.mark.enable_socket,
 ]
 
-if BASE_URL and urlparse(BASE_URL).hostname not in {"localhost", "127.0.0.1", "::1"}:
-    raise RuntimeError("Browser flows only run against a loopback Mercury server")
-
 playwright_api = pytest.importorskip("playwright.sync_api")
 expect = playwright_api.expect
 
 
-@pytest.fixture
-def watched_page():
-    with playwright_api.sync_playwright() as pw:
-        browser = pw.chromium.launch()
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
-        page = context.new_page()
-        problems: list[str] = []
-
-        def on_console(message):
-            text = message.text
-            if message.type == "error" or "Content Security Policy" in text or "Refused to" in text:
-                problems.append(f"{message.type}: {text}")
-
-        page.on("console", on_console)
-        page.on("pageerror", lambda error: problems.append(f"pageerror: {error}"))
-        page.on(
-            "request",
-            lambda request: problems.append(f"external request: {request.url}")
-            if not request.url.startswith((BASE_URL, "data:", "about:"))
-            else None,
-        )
-        yield page, problems
-        context.close()
-        browser.close()
-
-
-def _login(page):
-    page.goto(f"{BASE_URL}/")
-    expect(page.get_by_role("heading", level=1)).to_contain_text("calm, organized")
-    page.goto(f"{BASE_URL}/auth/dev")
-    page.get_by_role("button", name=re.compile("synthetic workspace", re.I)).click()
-    page.wait_for_url(re.compile(r"/app"))
-
-
 def test_synthetic_demo_flow(watched_page):
     page, problems = watched_page
-    _login(page)
-
-    # Start from a clean mailbox: disconnect through the confirmation dialog if connected.
-    page.goto(f"{BASE_URL}/settings")
-    disconnect = page.get_by_role("button", name="Disconnect and remove mailbox data")
-    if disconnect.count():
-        disconnect.click()
-        dialog = page.locator("#confirm-dialog")
-        expect(dialog).to_be_visible()
-        expect(dialog).to_contain_text("Gmail messages are not changed")
-        dialog.get_by_role("button", name="Disconnect and remove data").click()
-        page.wait_for_url(f"{BASE_URL}/")
-        expect(page.locator("#toast-stack")).to_contain_text("Gmail was disconnected")
-        _login(page)
+    login(page, expect)
+    disconnect_if_connected(page, expect)
 
     # Connect with the explicit disclosure; the required box is enforced server-side.
-    page.get_by_role("link", name="Connect Gmail").click()
-    expect(page.get_by_role("heading", level=1)).to_contain_text("exactly what Mercury does")
-    expect(page.locator("body")).to_contain_text("What Mercury never does")
-    page.get_by_label(re.compile("I understand how Mercury processes")).check()
-    page.get_by_label(re.compile("Allow selected message text")).check()
-    page.get_by_role("button", name=re.compile("Connect synthetic mailbox")).click()
-    page.wait_for_url(re.compile(r"/app$"))
-    expect(page.locator("#toast-stack")).to_contain_text("Synthetic mailbox connected")
+    connect_synthetic_mailbox(page, expect)
 
     # Workspace: three regions, original subjects, honest badges.
     row = page.locator("[data-thread-row]", has_text="Revised launch forecast")

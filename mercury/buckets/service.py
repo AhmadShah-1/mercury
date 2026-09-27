@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from email.utils import parseaddr
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 
 from mercury.accounts.models import GmailAccount
 from mercury.buckets.models import Bucket, BucketAssignment, SenderRule
@@ -35,6 +35,8 @@ def create_bucket(
         name=clean,
         purpose=" ".join(purpose.split())[:240],
         renamed_at=datetime.now(UTC),
+        # The user made it, so Mercury never files it into Misc.
+        crate_origin="user",
     )
     db.session.add(bucket)
     db.session.commit()
@@ -119,69 +121,16 @@ def follow_ai_name(user_id: uuid.UUID, bucket_id: uuid.UUID) -> None:
 
 
 def archive_bucket(user_id: uuid.UUID, bucket_id: uuid.UUID) -> None:
+    from mercury.buckets.crates import release_if_empty
+
     bucket = owned_bucket(user_id, bucket_id)
     if bucket is None:
         raise LookupError("bucket_not_found")
     bucket.archived = True
+    bucket.favorite = False
+    previous, bucket.crate_id = bucket.crate_id, None
+    release_if_empty(user_id, previous)
     db.session.commit()
-
-
-def merge_preview_count(user_id: uuid.UUID, source_id: uuid.UUID) -> int:
-    if owned_bucket(user_id, source_id) is None:
-        raise LookupError("bucket_not_found")
-    return (
-        db.session.scalar(
-            select(func.count())
-            .select_from(BucketAssignment)
-            .where(BucketAssignment.user_id == user_id, BucketAssignment.bucket_id == source_id)
-        )
-        or 0
-    )
-
-
-def merge_buckets(
-    user_id: uuid.UUID, source_id: uuid.UUID, destination_id: uuid.UUID
-) -> list[uuid.UUID]:
-    """Move every placement and rule into the destination; return manually placed thread IDs.
-
-    Everything is keyed by bucket ID, so later renames never break the merge. The destination
-    is exempt from automatic splitting (the user chose this grouping), its meaning is queued
-    for a refresh, and future matches use the combined members as examples.
-    """
-    source = owned_bucket(user_id, source_id)
-    destination = owned_bucket(user_id, destination_id)
-    if (
-        source is None
-        or destination is None
-        or source.gmail_account_id != destination.gmail_account_id
-    ):
-        raise LookupError("bucket_not_found")
-    if source.id == destination.id:
-        raise ValueError("a bucket cannot be merged into itself")
-    manual_ids = list(
-        db.session.scalars(
-            select(BucketAssignment.thread_id).where(
-                BucketAssignment.user_id == user_id,
-                BucketAssignment.bucket_id == source.id,
-                BucketAssignment.locked_by_user.is_(True),
-            )
-        )
-    )
-    db.session.execute(
-        update(BucketAssignment)
-        .where(BucketAssignment.user_id == user_id, BucketAssignment.bucket_id == source.id)
-        .values(bucket_id=destination.id, version=BucketAssignment.version + 1)
-    )
-    db.session.execute(
-        update(SenderRule)
-        .where(SenderRule.user_id == user_id, SenderRule.bucket_id == source.id)
-        .values(bucket_id=destination.id)
-    )
-    source.archived = True
-    destination.merged_at = datetime.now(UTC)
-    destination.meaning_stale = True
-    db.session.commit()
-    return manual_ids
 
 
 def normalize_sender(value: str) -> str:
@@ -307,3 +256,6 @@ def seed_demo_buckets(account: GmailAccount) -> None:
                 )
             )
     db.session.commit()
+    from mercury.buckets.crates import file_small_buckets
+
+    file_small_buckets(account)

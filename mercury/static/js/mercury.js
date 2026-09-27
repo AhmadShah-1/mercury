@@ -86,7 +86,8 @@
     toast.addEventListener("mouseleave", resume);
     toast.addEventListener("focusout", resume);
   };
-  const showToast = (message, tone = "success") => {
+  // `action` (optional) adds one small button, e.g. { label: "Undo", onClick() {} }.
+  const showToast = (message, tone = "success", action = null) => {
     const stack = toastStack();
     if (!stack) return;
     const toast = el("div", `toast-m toast-${tone}`);
@@ -94,6 +95,15 @@
     toast.setAttribute("data-toast", "");
     if (tone === "success" || tone === "info") toast.setAttribute("data-autodismiss", "");
     toast.append(el("p", "toast-text", message));
+    if (action && typeof action.onClick === "function") {
+      const button = el("button", "toast-action", action.label || "Undo");
+      button.type = "button";
+      button.addEventListener("click", () => {
+        dismissToast(toast);
+        action.onClick();
+      }, { once: true });
+      toast.append(button);
+    }
     const close = el("button", "toast-close", "×");
     close.type = "button";
     close.setAttribute("data-toast-close", "");
@@ -111,11 +121,14 @@
     if (!stack) return;
     stack.querySelectorAll("[data-toast]").forEach(armToast);
     new MutationObserver(() => stack.querySelectorAll("[data-toast]").forEach(armToast)).observe(stack, { childList: true });
+    // One-shot notices across a reload: fixed codes and counts only, never names.
     const pending = safeStorage.get("sessionStorage", "mercury-notice");
     if (pending) {
       safeStorage.remove("sessionStorage", "mercury-notice");
       const moved = /^moved:(\d{1,3})$/.exec(pending);
       if (moved) showToast(`Moved ${moved[1]} ${moved[1] === "1" ? "conversation" : "conversations"}. Mercury will keep them there.`);
+      else if (pending === "crate-emptied") showToast("Your change was saved. That crate had no buckets left, so Mercury removed it.", "info");
+      else if (pending === "retry") showToast("The page was out of date, so it was reloaded. Please try that again.", "warning");
     }
   };
 
@@ -399,7 +412,8 @@
           headers: { "X-CSRFToken": token, "X-Mercury-Bulk": "1" },
           body: new URLSearchParams({ csrf_token: token, bucket_id: destination }),
         });
-        if (response.type === "opaqueredirect" || response.ok) moved += 1;
+        // Bulk moves answer 204; a redirect (e.g. an expired session) is not a success.
+        if (response.ok) moved += 1;
         else failed += 1;
       } catch (error) {
         failed += 1;
@@ -519,6 +533,9 @@
         break;
     }
   });
+
+  /* A deliberately tiny surface for organize.js (drag and drop, crate forms). */
+  window.MercuryUI = Object.freeze({ showToast });
 
   /* ------------------------------------------------------------- init */
   const init = () => {

@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% from "components/icons.html" import icon %}
+{% from "components/ui.html" import csrf_input %}
 {% block title %}{{ title }} — Mercury{% endblock %}
 {% block content %}
 <section class="narrow-page">
   <a class="back-link page-back" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) if bucket else url_for('inbox.workspace') }}">{{ icon("arrow-left", "icon-sm") }} Back to {{ bucket.name if bucket else "workspace" }}</a>
   <div class="panel">
     <div class="panel-head">
-      <span class="panel-icon">{{ icon("pencil" if bucket else "folder") }}</span>
+      <span class="panel-icon">{{ icon("pencil" if bucket else "bucket") }}</span>
       <div>
         <h1 class="panel-title">{{ title }}</h1>
         <p class="panel-sub">{% if bucket %}Renaming keeps this bucket's identity and conversations. Mercury never renames a bucket you've named.{% else %}Create a destination, then move conversations into it. Once it has a few, Mercury also files similar new mail here.{% endif %}</p>
@@ -38,7 +39,7 @@
       <span class="panel-icon">{{ icon("sparkle") }}</span>
       <div>
         <h2 class="panel-title">Mercury's name for this cluster</h2>
-        <p class="panel-sub">Mercury keeps this current as the bucket grows, splits, or merges, so you can see how its meaning develops. Only Mercury edits it.</p>
+        <p class="panel-sub">Mercury keeps this current as the bucket grows or splits, so you can see how its meaning develops. Only Mercury edits it.</p>
       </div>
     </div>
     <dl class="meaning-facts">
@@ -58,16 +59,32 @@
   {% endif %}
 
   {% if bucket %}
+  {% set current = library.crate_of.get(bucket.id) if library else None %}
   <div class="panel">
     <div class="panel-head">
-      <span class="panel-icon">{{ icon("merge") }}</span>
-      <div><h2 class="panel-title">Combine or retire</h2><p class="panel-sub">Neither option deletes Gmail messages or labels.</p></div>
+      <span class="panel-icon">{{ icon("crate") }}</span>
+      <div><h2 class="panel-title">Group or retire</h2><p class="panel-sub">Neither option deletes Gmail messages or labels, and conversations stay in this bucket.</p></div>
     </div>
+    {% if library %}
     <div class="danger-block">
-      <h3>Merge into another bucket</h3>
-      <p class="muted-m">Moves this bucket's conversations and sender rules to another bucket, after showing how many will change.</p>
-      <a class="btn btn-quiet" href="{{ url_for('buckets.merge', bucket_id=bucket.id) }}">{{ icon("merge", "icon-sm") }} Review merge</a>
+      <h3>Crate</h3>
+      <p class="muted-m">{% if current %}In <a href="{{ url_for('inbox.crate_workspace', crate_id=current.id) }}">{{ current.name }}</a>. {% else %}Not in a crate. {% endif %}A crate gathers related buckets so you can read them as one list. It never moves or merges conversations, and you can take a bucket out at any time.</p>
+      <form class="crate-place-form" method="post" action="{{ url_for('buckets.place', bucket_id=bucket.id) }}">
+        {{ csrf_input() }}
+        {% if next_path %}<input type="hidden" name="next" value="{{ next_path }}">{% endif %}
+        <div class="crate-place-field">
+          <label class="form-label" for="place-crate">Put this bucket in</label>
+          <select class="form-select" id="place-crate" name="crate_id">
+            {% for crate in library.crates %}<option value="{{ crate.id }}"{% if current and current.id == crate.id %} selected{% endif %}>{{ crate.name }}{% if crate.is_misc %} (automatic){% endif %}</option>{% endfor %}
+            <option value="new">A new crate</option>
+            <option value=""{% if not current %} selected{% endif %}>No crate</option>
+          </select>
+        </div>
+        <button class="btn btn-quiet" type="submit">{{ icon("check", "icon-sm") }} Save</button>
+      </form>
+      <p class="field-hint">Prefer dragging? <a href="{{ url_for('buckets.organize') }}">Open the Organize view</a> to arrange every crate and bucket at once.</p>
     </div>
+    {% endif %}
     <div class="danger-block">
       <h3>Archive bucket</h3>
       <p class="muted-m">Hides it from navigation. Conversations keep their history; nothing changes in Gmail.</p>

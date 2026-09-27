@@ -6,7 +6,8 @@ One pass runs in the worker after analysis, under the account lock:
 2. split buckets whose members have separated into distinct topics;
 3. file unplaced threads into the one bucket each clearly matches;
 4. suggest new buckets from what is still unplaced;
-5. refresh Mercury's meaning for buckets that were created, split, merged, or have grown.
+5. refresh Mercury's meaning for buckets that were created, split, or have grown;
+6. file Mercury's small buckets into the Misc crate, and take grown ones back out.
 
 Only unplaced threads and buckets that grew are clustered; the whole mailbox never is. Manual
 moves and sender rules are never changed. The pass needs no AI calls except bucket naming,
@@ -24,6 +25,7 @@ from mercury.buckets.classification import (
     load_thread_vectors,
     prune_misfits,
 )
+from mercury.buckets.crates import file_small_buckets
 from mercury.buckets.discovery import (
     discover_suggested_buckets,
     organization_enabled,
@@ -34,7 +36,7 @@ from mercury.extensions import db
 
 
 def organize_account(account: GmailAccount) -> dict[str, int]:
-    counts = dict.fromkeys(("pruned", "split", "placed", "suggested", "renamed"), 0)
+    counts = dict.fromkeys(("pruned", "split", "placed", "suggested", "renamed", "crated"), 0)
     if not organization_enabled(account):
         return counts
     rows = load_thread_vectors(account)
@@ -46,6 +48,7 @@ def organize_account(account: GmailAccount) -> dict[str, int]:
     db.session.commit()
     counts["suggested"] = discover_suggested_buckets(account, rows, active)
     counts["renamed"] = refresh_meanings(account, rows, active)
+    counts["crated"] = file_small_buckets(account)
     if any(counts.values()):
         account.last_organized_at = datetime.now(UTC)
         db.session.commit()
