@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c AS builder
+FROM python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e AS builder
 ENV POETRY_VERSION=2.4.1 POETRY_VIRTUALENVS_IN_PROJECT=true POETRY_NO_INTERACTION=1
 WORKDIR /app
 RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
@@ -9,13 +9,16 @@ COPY mercury ./mercury
 COPY scripts ./scripts
 RUN poetry run python scripts/fetch_vendor_assets.py
 RUN poetry install --only main --sync
+# The runtime never installs packages; drop pip and its vendored libraries from the shipped venv.
+RUN rm -rf /app/.venv/lib/python3.12/site-packages/pip /app/.venv/lib/python3.12/site-packages/pip-* /app/.venv/bin/pip*
 
 FROM dopplerhq/cli:3@sha256:e974c93a74b0fd8795e48eb24b43eea273bf7773294f14c8c9184baf66e658cc AS doppler
 
-FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c AS runtime
+FROM python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e AS runtime
 ENV PATH="/app/.venv/bin:${PATH}" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
-RUN addgroup --system mercury && adduser --system --ingroup mercury --home /nonexistent mercury
+RUN addgroup --system mercury && adduser --system --ingroup mercury --home /nonexistent mercury \
+    && python -m pip uninstall --yes --quiet pip
 COPY --from=doppler /bin/doppler /usr/local/bin/doppler
 COPY --from=builder /app/.venv /app/.venv
 COPY --chown=mercury:mercury mercury ./mercury

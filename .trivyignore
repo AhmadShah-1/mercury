@@ -1,0 +1,6 @@
+# Each entry needs a reason and an expiry; Trivy fails the scan again once `exp` passes.
+
+# golang.org/x/crypto/ssh source-address restrictions (SSH servers only). The Doppler CLI
+# binary links only x/crypto/ssh/terminal, not the SSH server code; no fixed Doppler release
+# existed as of 2026-09-27 (v3.76.6 pins x/crypto v0.54.0). Bump dopplerhq/cli when one ships.
+CVE-2026-56854 exp:2026-12-31
