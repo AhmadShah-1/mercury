@@ -1,7 +1,14 @@
-@description('Deployment prefix')
+@description('Resource base name; resources are named <name>-<role>-<environmentName>')
 param name string = 'mercury'
 
-@description('Globally unique, lowercase Azure Container Registry name')
+@description('Deployment name. Both environments run APP_ENV=production; this only separates resources.')
+@allowed([
+  'staging'
+  'production'
+])
+param environmentName string
+
+@description('Globally unique, lowercase Azure Container Registry name, shared by both environments')
 param registryName string
 
 @description('Azure region')
@@ -10,8 +17,11 @@ param location string = resourceGroup().location
 @description('Immutable ACR image reference including its sha256 digest')
 param image string
 
+@description('Git commit deployed, exposed to the application as RELEASE_ID')
+param releaseId string
+
 @secure()
-@description('Scoped, read-only Doppler production service token')
+@description('Scoped, read-only Doppler service token for this environment\'s config')
 param dopplerToken string
 
 @secure()
@@ -23,9 +33,23 @@ param postgresAdmin string = 'mercuryadmin'
 @description('Hostname of APP_BASE_URL (for example app.example.com). Probes send it as Host because Mercury rejects untrusted Host headers.')
 param appHostname string
 
+@description('Managed certificate already bound to appHostname, or empty before the first binding. Redeploying without it would remove the custom domain.')
+param customDomainCertificateId string = ''
+
+var tags = {
+  app: name
+  environment: environmentName
+}
+
+// The registry is shared by both environments, so it carries no environment tag.
+var sharedTags = {
+  app: name
+}
+
 resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
-  name: '${name}-vnet'
+  name: '${name}-vnet-${environmentName}'
   location: location
+  tags: tags
   properties: {
     addressSpace: {
       addressPrefixes: [
@@ -68,14 +92,16 @@ resource databaseSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' =
 }
 
 resource privateDns 'Microsoft.Network/privateDnsZones@2024-06-01' = {
-  name: 'private.postgres.database.azure.com'
+  name: '${name}-${environmentName}.private.postgres.database.azure.com'
   location: 'global'
+  tags: tags
 }
 
 resource privateDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
   parent: privateDns
-  name: '${name}-postgres-link'
+  name: '${name}-postgres-link-${environmentName}'
   location: 'global'
+  tags: tags
   properties: {
     virtualNetwork: {
       id: network.id
@@ -85,8 +111,9 @@ resource privateDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2
 }
 
 resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
-  name: '${name}-postgres'
+  name: '${name}-postgres-${environmentName}'
   location: location
+  tags: tags
   sku: {
     name: 'Standard_B1ms'
     tier: 'Burstable'
@@ -144,6 +171,7 @@ resource postgresExtensions 'Microsoft.DBforPostgreSQL/flexibleServers/configura
 resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: registryName
   location: location
+  tags: sharedTags
   sku: {
     name: 'Basic'
   }
@@ -154,8 +182,9 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
 }
 
 resource pullIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: '${name}-pull'
+  name: '${name}-pull-${environmentName}'
   location: location
+  tags: tags
 }
 
 // Built-in AcrPull role.
@@ -174,10 +203,35 @@ resource registryPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-resource containerEnvironment 'Microsoft.App/managedEnvironments@2025-01-01' = {
-  name: '${name}-environment'
+// Retains sanitized application logs (including deletion audit events) for 30 days. The daily
+// cap bounds runaway cost; normal volume stays well inside the monthly free ingestion allowance.
+resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+  name: '${name}-logs-${environmentName}'
   location: location
+  tags: tags
   properties: {
+    sku: {
+      name: 'PerGB2018'
+    }
+    retentionInDays: 30
+    workspaceCapping: {
+      dailyQuotaGb: json('0.5')
+    }
+  }
+}
+
+resource containerEnvironment 'Microsoft.App/managedEnvironments@2025-01-01' = {
+  name: '${name}-environment-${environmentName}'
+  location: location
+  tags: tags
+  properties: {
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsConfiguration: {
+        customerId: logs.properties.customerId
+        sharedKey: logs.listKeys().primarySharedKey
+      }
+    }
     // A workload-profiles environment is required for a subnet delegated to Microsoft.App.
     workloadProfiles: [
       {
@@ -215,6 +269,10 @@ var commonEnv = [
     name: 'DOPPLER_TOKEN'
     secretRef: 'doppler-token'
   }
+  {
+    name: 'RELEASE_ID'
+    value: releaseId
+  }
 ]
 
 var registryConfiguration = [
@@ -225,8 +283,9 @@ var registryConfiguration = [
 ]
 
 resource web 'Microsoft.App/containerApps@2025-01-01' = {
-  name: '${name}-web'
+  name: '${name}-web-${environmentName}'
   location: location
+  tags: tags
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -243,6 +302,15 @@ resource web 'Microsoft.App/containerApps@2025-01-01' = {
         targetPort: 8000
         transport: 'http'
         allowInsecure: false
+        customDomains: empty(customDomainCertificateId)
+          ? []
+          : [
+              {
+                name: appHostname
+                certificateId: customDomainCertificateId
+                bindingType: 'SniEnabled'
+              }
+            ]
       }
       registries: registryConfiguration
       secrets: commonSecrets
@@ -305,8 +373,9 @@ resource web 'Microsoft.App/containerApps@2025-01-01' = {
 }
 
 resource worker 'Microsoft.App/containerApps@2025-01-01' = {
-  name: '${name}-worker'
+  name: '${name}-worker-${environmentName}'
   location: location
+  tags: tags
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -351,8 +420,9 @@ resource worker 'Microsoft.App/containerApps@2025-01-01' = {
 }
 
 resource migrationJob 'Microsoft.App/jobs@2025-01-01' = {
-  name: '${name}-migrate'
+  name: '${name}-migrate-${environmentName}'
   location: location
+  tags: tags
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {

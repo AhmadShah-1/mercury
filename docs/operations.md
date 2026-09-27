@@ -6,7 +6,30 @@ Build one image, scan it, record its digest as `RELEASE_ID`, then run applicatio
 
 The release job runs `flask --app wsgi:app db upgrade && flask --app wsgi:app queue-schema`. `queue-schema` installs Procrastinate's schema only when `procrastinate_jobs` is absent, so it is safe on every release. When upgrading the pinned Procrastinate version, apply the SQL files for the intervening versions from `procrastinate schema --migrations-path` in the same controlled job before deploying the new image.
 
-The deploy workflow passes `appHostname` (the `APP_BASE_URL` host) to Bicep because Container Apps probes must send an allowed `Host` header; Mercury rejects any other host with HTTP 400. The workflow deploys the revision and then starts the migration job and polls it; readiness includes a schema check, so a revision needing an unapplied migration never becomes ready.
+The deploy workflow passes `appHostname` (the `APP_BASE_URL` host) to Bicep because Container Apps probes must send an allowed `Host` header; Mercury rejects any other host with HTTP 400. The workflow deploys the revision and then starts the migration job and polls it; readiness includes a schema check, so a revision needing an unapplied migration never becomes ready. It records the Git commit as `RELEASE_ID`, so do not also set `RELEASE_ID` in Doppler (Doppler's value would override it).
+
+## Environments
+
+`staging` and `production` are deployment names, not application modes. Both run `APP_ENV=production`, so every fail-closed check, secure cookie, and header applies to anyone with real Gmail tokens, including Google test users. Each has its own:
+
+| | staging | production |
+|---|---|---|
+| GitHub environment (secrets `DOPPLER_TOKEN`, `POSTGRES_ADMIN_PASSWORD`) | `staging` | `production` |
+| Doppler config | `mercury` / `stg` | `mercury` / `prd` |
+| Azure resource names (tagged `environment=<name>`) | `mercury-<role>-staging` | `mercury-<role>-production` |
+| PostgreSQL host in `DATABASE_URL` | `mercury-postgres-staging.postgres.database.azure.com` | `mercury-postgres-production.postgres.database.azure.com` |
+
+Both environments share the operator-created `Mercury` resource group and one container registry (registry names allow only letters and digits, so it has no suffix). Each GitHub environment needs its own federated credential with subject `repo:OWNER/REPO:environment:<name>`. Never point one environment's Doppler config at another's database.
+
+## Custom domain
+
+Bind the custom domain once by hand after the first deploy, with `<env>` as `staging` or `production`:
+
+1. Read `properties.configuration.ingress.fqdn` and `properties.customDomainVerificationId` from `az containerapp show -g <rg> -n mercury-web-<env>`.
+2. At the DNS provider, create `CNAME <host> -> <fqdn>` and `TXT asuid.<host> -> <verification id>`.
+3. `az containerapp hostname add -g <rg> -n mercury-web-<env> --hostname <host>`, then `az containerapp hostname bind -g <rg> -n mercury-web-<env> --hostname <host> --environment mercury-environment-<env> --validation-method CNAME`. This issues a free managed certificate, which Azure renews.
+
+Later deploys look up that managed certificate and pass it to Bicep as `customDomainCertificateId`; without it, the redeployed ingress would drop the binding.
 
 ## Worker recovery model
 

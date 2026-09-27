@@ -1,23 +1,36 @@
-name: Deploy production
+name: Deploy
 
+# Staging and production are deployment names only: both run APP_ENV=production (set in Bicep)
+# so every fail-closed check and hardening applies. They differ in GitHub environment, Doppler
+# config (via that environment's DOPPLER_TOKEN), and resource names (mercury-<role>-<environment>,
+# tagged environment=<environment>) inside one shared resource group.
 on:
   workflow_dispatch:
     inputs:
-      resource_group:
-        description: Existing or approved Azure resource-group name
+      environment:
+        description: GitHub environment whose secrets and approval rules apply
         required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
+      resource_group:
+        description: Existing Azure resource group holding both environments
+        required: true
+        default: Mercury
         type: string
       location:
-        description: Azure region
-        required: true
-        default: eastus
+        description: Azure region for new resources (blank uses the resource group's region)
+        required: false
+        default: ""
         type: string
       registry_name:
-        description: Globally unique lowercase ACR name
+        description: Globally unique lowercase alphanumeric ACR name, shared by both environments
         required: true
         type: string
       app_hostname:
-        description: Hostname of the production APP_BASE_URL (used as the probe Host header)
+        description: Hostname of this environment's APP_BASE_URL (used as the probe Host header)
         required: true
         type: string
 
@@ -26,13 +39,13 @@ permissions:
   id-token: write
 
 concurrency:
-  group: mercury-production
+  group: mercury-${{ inputs.environment }}
   cancel-in-progress: false
 
 jobs:
   build-scan-deploy:
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
@@ -40,26 +53,46 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Create approved resource group
-        run: >-
-          az group create
-          --name '${{ inputs.resource_group }}'
-          --location '${{ inputs.location }}'
-          --only-show-errors
+      # The resource group is created by an operator; the deploy identity is scoped to it.
+      - name: Resolve names and region
+        id: names
+        shell: bash
+        run: |
+          set -euo pipefail
+          location='${{ inputs.location }}'
+          if [ -z "$location" ]; then
+            location="$(az group show --name '${{ inputs.resource_group }}' --query location -o tsv --only-show-errors)"
+          fi
+          echo "location=${location}" >> "$GITHUB_OUTPUT"
+          echo "suffix=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
       - name: Bootstrap private registry
         run: >-
           az deployment group create
           --resource-group '${{ inputs.resource_group }}'
           --template-file deploy/azure/bootstrap.bicep
-          --parameters registryName='${{ inputs.registry_name }}' location='${{ inputs.location }}'
+          --parameters registryName='${{ inputs.registry_name }}' location='${{ steps.names.outputs.location }}'
           --only-show-errors
-      - name: Build locked image once in ACR
-        run: >-
-          az acr build
-          --registry '${{ inputs.registry_name }}'
-          --image mercury:${{ github.sha }}
-          --file deploy/Dockerfile .
-          --only-show-errors
+      # Built on the runner rather than with `az acr build`: ACR Tasks are unavailable on
+      # free-credit subscriptions. The image is scanned before it ever reaches the registry.
+      - name: Build locked image once
+        id: build
+        shell: bash
+        run: |
+          login_server="$(az acr show --name '${{ inputs.registry_name }}' --query loginServer -o tsv)"
+          tag="${login_server}/mercury:${{ github.sha }}"
+          docker build -f deploy/Dockerfile -t "$tag" .
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.build.outputs.tag }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - name: Push scanned image
+        run: |
+          az acr login --name '${{ inputs.registry_name }}'
+          docker push '${{ steps.build.outputs.tag }}'
       - name: Resolve immutable image digest
         id: image
         shell: bash
@@ -67,38 +100,49 @@ jobs:
           digest="$(az acr manifest show-metadata --registry '${{ inputs.registry_name }}' --name 'mercury:${{ github.sha }}' --query digest -o tsv)"
           login_server="$(az acr show --name '${{ inputs.registry_name }}' --query loginServer -o tsv)"
           echo "reference=${login_server}/mercury@${digest}" >> "$GITHUB_OUTPUT"
-      - name: Pull immutable image for scanning
+      # The custom domain is bound once by hand (docs/operations.md). Later deploys must pass its
+      # managed certificate back to Bicep, or the redeployed ingress would drop the binding.
+      - name: Find bound custom-domain certificate
+        id: domain
+        shell: bash
         run: |
-          az acr login --name '${{ inputs.registry_name }}'
-          docker pull '${{ steps.image.outputs.reference }}'
-      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ steps.image.outputs.reference }}
-          format: table
-          exit-code: "1"
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
+          set -euo pipefail
+          rg='${{ inputs.resource_group }}'
+          env_name='mercury-environment-${{ steps.names.outputs.suffix }}'
+          cert_id=""
+          exists="$(az containerapp env list --resource-group "$rg" --only-show-errors \
+            --query "length([?name=='${env_name}'])" -o tsv)"
+          if [ "$exists" = "1" ]; then
+            cert_id="$(az containerapp env certificate list --resource-group "$rg" --name "$env_name" \
+              --managed-certificates-only --only-show-errors \
+              --query "[?properties.subjectName=='${{ inputs.app_hostname }}'].id | [0]" -o tsv)"
+          fi
+          echo "certificate_id=${cert_id}" >> "$GITHUB_OUTPUT"
       - name: Deploy infrastructure and immutable revision
         run: >-
           az deployment group create
           --resource-group '${{ inputs.resource_group }}'
           --template-file deploy/azure/main.bicep
           --parameters
+          environmentName='${{ inputs.environment }}'
           registryName='${{ inputs.registry_name }}'
-          location='${{ inputs.location }}'
+          location='${{ steps.names.outputs.location }}'
           image='${{ steps.image.outputs.reference }}'
-          dopplerToken='${{ secrets.DOPPLER_PRODUCTION_TOKEN }}'
+          releaseId='${{ github.sha }}'
+          dopplerToken='${{ secrets.DOPPLER_TOKEN }}'
           postgresPassword='${{ secrets.POSTGRES_ADMIN_PASSWORD }}'
           appHostname='${{ inputs.app_hostname }}'
+          customDomainCertificateId='${{ steps.domain.outputs.certificate_id }}'
           --only-show-errors
       - name: Run controlled migrations
         shell: bash
         run: |
           set -euo pipefail
           rg='${{ inputs.resource_group }}'
-          execution="$(az containerapp job start --resource-group "$rg" --name mercury-migrate --query name -o tsv --only-show-errors)"
+          job='mercury-migrate-${{ steps.names.outputs.suffix }}'
+          execution="$(az containerapp job start --resource-group "$rg" --name "$job" --query name -o tsv --only-show-errors)"
           for _ in $(seq 1 120); do
-            status="$(az containerapp job execution show --resource-group "$rg" --name mercury-migrate --job-execution-name "$execution" --query properties.status -o tsv --only-show-errors)"
+            status="$(az containerapp job execution show --resource-group "$rg" --name "$job" --job-execution-name "$execution" --query properties.status -o tsv --only-show-errors)"
             case "$status" in
               Succeeded) echo "Migration execution succeeded"; exit 0 ;;
               Failed|Stopped|Degraded) echo "Migration execution ended with status $status" >&2; exit 1 ;;
