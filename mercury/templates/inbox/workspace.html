@@ -27,24 +27,29 @@
 {% else %}
 {% set run_active = latest_run and latest_run.status in ["pending", "running"] %}
 <div class="workspace" data-workspace data-home-url="{{ url_for('inbox.workspace') }}">
-  <aside class="ws-nav" aria-label="Workspace navigation">
+  <aside class="ws-nav" id="ws-nav" aria-label="Workspace navigation">
+    <div class="ws-nav-top js-only">
+      <button type="button" class="icon-btn icon-btn-sm nav-toggle" data-nav-toggle aria-controls="ws-nav" aria-expanded="true" title="Collapse sidebar ([)">{{ icon("sidebar", "icon-sm") }}<span class="visually-hidden" data-nav-toggle-label>Collapse sidebar</span></button>
+    </div>
     <nav class="ws-nav-scroll" data-ws-nav>
       <ul class="nav-list" role="list">
         {% set view_icons = {"overview": "grid", "attention": "flag"} %}
         {% set view_counts = {"overview": counts.total, "attention": counts.attention} %}
         {% for key, label in views.items() %}
-        <li><a class="nav-item" href="{{ url_for('inbox.workspace') if key == 'overview' else url_for('inbox.workspace', view=key) }}"{% if not selected_bucket and not selected_crate and view == key %} aria-current="page"{% endif %}>
+        <li><a class="nav-item" href="{{ url_for('inbox.workspace') if key == 'overview' else url_for('inbox.workspace', view=key) }}" title="{{ label }}"{% if not selected_bucket and not selected_crate and view == key %} aria-current="page"{% endif %}>
           {{ icon(view_icons[key]) }}<span class="nav-label">{{ label }}</span>{{ count(view_counts[key], "conversations") }}
         </a></li>
         {% endfor %}
       </ul>
       {% if library %}
       {% set lib = library %}
-      <div data-ws-nav-library>
+      <div class="nav-library" data-ws-nav-library>
+      <div class="nav-library-head">
+        <a class="nav-edit" href="{{ url_for('buckets.organize') }}" title="Organize crates and buckets">{{ icon("pencil", "icon-xs") }}<span>Edit</span><span class="visually-hidden"> crates and buckets</span></a>
+      </div>
       <div class="nav-group nav-group-crates">
         <div class="nav-heading">
           <h2 class="nav-heading-text" id="crates-heading">Crates</h2>
-          <a class="nav-edit" href="{{ url_for('buckets.organize') }}" title="Organize crates and buckets">{{ icon("pencil", "icon-xs") }}<span>Edit</span><span class="visually-hidden"> crates and buckets</span></a>
         </div>
         {% if lib.nav_crates %}
         <ul class="nav-list" role="list" aria-labelledby="crates-heading">
@@ -96,9 +101,6 @@
       </div>
       </div>
       {% endif %}
-      <ul class="nav-list nav-list-secondary" role="list">
-        <li><a class="nav-item" href="{{ url_for('buckets.rules') }}">{{ icon("funnel") }}<span class="nav-label">Sender rules</span></a></li>
-      </ul>
     </nav>
     <div class="sync-card" aria-label="Synchronization status" role="group">
       <div class="sync-identity">
@@ -125,7 +127,7 @@
   {% else %}
     {% set list_kind, list_buckets = ("unsorted" if view == "unsorted" else "other"), [] %}
   {% endif %}
-  <section class="ws-list" aria-labelledby="list-title" data-list-region data-list-kind="{{ list_kind }}" data-list-buckets="{{ list_buckets|map(attribute='id')|join(' ') }}{% if selected_crate and selected_crate.is_misc and not crate_filter %} {{ unsorted_value }}{% endif %}">
+  <section class="ws-list" id="ws-list" aria-labelledby="list-title" data-list-region data-list-kind="{{ list_kind }}" data-list-buckets="{{ list_buckets|map(attribute='id')|join(' ') }}{% if selected_crate and selected_crate.is_misc and not crate_filter %} {{ unsorted_value }}{% endif %}">
     <header class="list-head" data-list-head>
       <div class="list-title-row">
         <div class="list-title-wrap">
@@ -287,6 +289,7 @@
       {% endif %}
     {% endif %}
   </section>
+  <div class="ws-resizer js-only" role="separator" aria-orientation="vertical" aria-controls="ws-list" aria-label="Resize conversation list" tabindex="0" title="Drag to resize · double-click to reset" data-list-resizer></div>
 
   <section class="ws-reader" id="reader-panel" aria-label="Reader" tabindex="-1" data-reader-panel>
     <div class="reader-empty">
@@ -333,6 +336,7 @@
       <div><dt><kbd>m</kbd></dt><dd>Move selected…</dd></div>
       <div><dt><kbd>/</kbd></dt><dd>Filter this list</dd></div>
       <div><dt><kbd>Esc</kbd></dt><dd>Back to the list</dd></div>
+      <div><dt><kbd>[</kbd></dt><dd>Collapse or expand the sidebar</dd></div>
       <div><dt><kbd>?</kbd></dt><dd>Show this help</dd></div>
     </dl>
     <div class="dialog-actions"><button class="btn btn-primary" type="submit">Done</button></div>

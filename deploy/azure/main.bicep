@@ -46,6 +46,8 @@ var sharedTags = {
   app: name
 }
 
+// Subnets are declared inline so the network is written in one operation; separate subnet
+// resources deploy in parallel and fail with AnotherOperationInProgress.
 resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: '${name}-vnet-${environmentName}'
   location: location
@@ -56,39 +58,47 @@ resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
         '10.42.0.0/16'
       ]
     }
+    subnets: [
+      {
+        name: 'apps'
+        properties: {
+          addressPrefix: '10.42.0.0/23'
+          delegations: [
+            {
+              name: 'container-apps'
+              properties: {
+                serviceName: 'Microsoft.App/environments'
+              }
+            }
+          ]
+        }
+      }
+      {
+        name: 'database'
+        properties: {
+          addressPrefix: '10.42.2.0/24'
+          delegations: [
+            {
+              name: 'postgres'
+              properties: {
+                serviceName: 'Microsoft.DBforPostgreSQL/flexibleServers'
+              }
+            }
+          ]
+        }
+      }
+    ]
   }
 }
 
-resource appsSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' = {
+resource appsSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' existing = {
   parent: network
   name: 'apps'
-  properties: {
-    addressPrefix: '10.42.0.0/23'
-    delegations: [
-      {
-        name: 'container-apps'
-        properties: {
-          serviceName: 'Microsoft.App/environments'
-        }
-      }
-    ]
-  }
 }
 
-resource databaseSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' = {
+resource databaseSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' existing = {
   parent: network
   name: 'database'
-  properties: {
-    addressPrefix: '10.42.2.0/24'
-    delegations: [
-      {
-        name: 'postgres'
-        properties: {
-          serviceName: 'Microsoft.DBforPostgreSQL/flexibleServers'
-        }
-      }
-    ]
-  }
 }
 
 resource privateDns 'Microsoft.Network/privateDnsZones@2024-06-01' = {
@@ -244,6 +254,11 @@ resource containerEnvironment 'Microsoft.App/managedEnvironments@2025-01-01' = {
       internal: false
     }
   }
+  // Joining the apps subnet and PostgreSQL joining the database subnet both write to the same
+  // virtual network, which accepts one operation at a time.
+  dependsOn: [
+    postgres
+  ]
 }
 
 var probeHeaders = [

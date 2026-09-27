@@ -17,7 +17,7 @@ from tests.conftest import csrf_token
 def _section(html: str, heading_id: str) -> str:
     """The sidebar group that starts at the given heading, up to the next group."""
     start = html.index(f'id="{heading_id}"')
-    ends = [html.find(marker, start) for marker in ('class="nav-group', "nav-list-secondary")]
+    ends = [html.find(marker, start) for marker in ('class="nav-group', "</nav>")]
     return html[start : min(end for end in ends if end != -1)]
 
 
@@ -29,9 +29,10 @@ def _ids(app, *names):
 def test_sidebar_puts_crates_above_buckets_with_one_edit_view(app, client, connected):
     html = client.get("/app").data.decode()
     assert html.index('id="crates-heading"') < html.index('id="buckets-heading"')
-    crates = _section(html, "crates-heading")
-    assert "Misc" in crates and 'href="/app/organize"' in crates
-    assert crates.count('href="/app/organize"') == 1
+    # One Edit control heads the whole Crates + Buckets section, above both headings.
+    head = html[html.index('class="nav-library"') : html.index('id="crates-heading"')]
+    assert head.count('href="/app/organize"') == 1
+    assert "Misc" in _section(html, "crates-heading")
     assert "buckets.merge" not in html and "/merge" not in html
     with app.app_context():
         assert len(db.session.scalars(select(Bucket)).all()) == 4

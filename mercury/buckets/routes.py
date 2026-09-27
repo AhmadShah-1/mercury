@@ -5,7 +5,6 @@ from urllib.parse import urlsplit
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
-from sqlalchemy import select
 
 from mercury.accounts.forms import EmptyForm
 from mercury.buckets.crates import (
@@ -28,9 +27,7 @@ from mercury.buckets.forms import (
     NewCrateForm,
     PlaceBucketForm,
     RenameCrateForm,
-    SenderRuleForm,
 )
-from mercury.buckets.models import SenderRule
 from mercury.buckets.service import (
     active_buckets,
     archive_bucket,
@@ -38,9 +35,7 @@ from mercury.buckets.service import (
     follow_ai_name,
     owned_bucket,
     rename_bucket,
-    save_sender_rule,
 )
-from mercury.extensions import db
 
 bp = Blueprint("buckets", __name__)
 
@@ -302,23 +297,8 @@ def crate_combine(crate_id):
     )
 
 
-@bp.route("/app/rules", methods=["GET", "POST"])
+@bp.get("/app/rules")
 @login_required
 def rules():
-    account = current_user.gmail_account
-    if account is None:
-        abort(404)
-    choices = [(str(item.id), item.name) for item in active_buckets(current_user.id)]
-    form = SenderRuleForm()
-    form.bucket_id.choices = choices
-    if form.validate_on_submit():
-        save_sender_rule(
-            current_user.id, account.id, form.sender_address.data, uuid.UUID(form.bucket_id.data)
-        )
-        return redirect(url_for("buckets.rules"))
-    rows = db.session.scalars(
-        select(SenderRule)
-        .where(SenderRule.user_id == current_user.id)
-        .order_by(SenderRule.sender_address)
-    ).all()
-    return render_template("buckets/rules.html", form=form, rules=rows)
+    """Sender rules live in Settings; keep the old address working."""
+    return redirect(url_for("accounts.settings", _anchor="sender-rules"))

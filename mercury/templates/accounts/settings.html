@@ -67,6 +67,53 @@
     {% endif %}
   </section>
 
+  {% if account and rule_form %}
+  {% set bucket_names = dict(rule_form.bucket_id.choices) %}
+  <section class="panel" id="sender-rules" aria-labelledby="rules-heading">
+    <div class="panel-head">
+      <span class="panel-icon">{{ icon("funnel") }}</span>
+      <div><h2 class="panel-title" id="rules-heading">Sender rules</h2><p class="panel-sub">Send every new conversation from one address straight to a bucket. Rules are organization instructions, not trust or security judgments, and they take priority over suggestions.</p></div>
+    </div>
+    {% if rule_form.bucket_id.choices %}
+    <form class="form-stack" method="post" action="{{ url_for('accounts.sender_rules') }}" novalidate>
+      {{ rule_form.hidden_tag() }}
+      <div class="rule-fields">
+        <div>
+          {{ rule_form.sender_address.label(class_="form-label") }}
+          {{ rule_form.sender_address(class_="form-control" ~ (" is-invalid" if rule_form.sender_address.errors else ""), placeholder="name@example.com", autocomplete="off", spellcheck="false", inputmode="email", maxlength=320) }}
+          {% for error in rule_form.sender_address.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+        </div>
+        <div>
+          {{ rule_form.bucket_id.label(class_="form-label") }}
+          {{ rule_form.bucket_id(class_="form-select") }}
+        </div>
+      </div>
+      <div class="form-actions"><button class="btn btn-quiet" type="submit">{{ icon("plus", "icon-sm") }} {{ rule_form.submit.label.text }}</button><span class="field-hint">Matching is exact and case-insensitive. Saving a rule for an existing address updates it.</span></div>
+    </form>
+    {% else %}
+    <p class="muted-m">Create a bucket first. <a href="{{ url_for('buckets.create') }}">Create bucket</a></p>
+    {% endif %}
+    {% if rules %}
+    <div class="table-wrap rule-table">
+      <table class="table-m">
+        <thead><tr><th scope="col">Sender</th><th scope="col">Destination</th><th scope="col">Status</th></tr></thead>
+        <tbody>
+          {% for rule in rules %}
+          <tr>
+            <td class="mono">{{ rule.sender_address }}</td>
+            <td>{% if bucket_names.get(rule.bucket_id|string) %}{{ badge(bucket_names.get(rule.bucket_id|string), "bucket", "bucket") }}{% else %}{{ badge("Archived bucket", "muted", "eye-off") }}{% endif %}</td>
+            <td>{% if rule.enabled %}{{ badge("Active", "success", "check") }}{% else %}{{ badge("Paused", "neutral", "pause") }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="rule-empty">No rules yet. Rules are optional; Mercury's suggestions and your manual moves work without them.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
   {% if account and label_form is defined %}
   {% set operator_on = config.GMAIL_LABEL_WRITES_ENABLED %}
   {% set can_enable = operator_on and config.MAIL_MODE == "gmail" %}

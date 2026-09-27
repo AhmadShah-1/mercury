@@ -118,3 +118,65 @@ def test_unsorted_is_a_fixed_misc_bucket_and_manual_destination(app, client, con
 
     assert subject.encode() in client.get("/app?view=unsorted").data
     assert subject.encode() in client.get(f"/app/crates/{misc_id}").data
+
+
+def test_sender_rules_are_managed_in_settings(app, client, connected):
+    from mercury.buckets.models import SenderRule
+
+    workspace = client.get("/app")
+    assert b"Sender rules" not in workspace.data
+    old = client.get("/app/rules", follow_redirects=False)
+    assert old.status_code == 302
+    assert old.headers["Location"].endswith("/settings#sender-rules")
+
+    settings = client.get("/settings")
+    assert b'id="sender-rules"' in settings.data
+    with app.app_context():
+        bucket = db.session.scalar(select(Bucket).where(Bucket.archived.is_(False)))
+        bucket_id, bucket_name = bucket.id, bucket.name
+
+    token = csrf_token(settings)
+    missing_csrf = client.post(
+        "/settings/rules", data={"sender_address": "a@example.invalid", "bucket_id": bucket_id}
+    )
+    assert missing_csrf.status_code == 400
+    invalid = client.post(
+        "/settings/rules",
+        data={"sender_address": "", "bucket_id": str(bucket_id), "csrf_token": token},
+    )
+    assert invalid.status_code == 400
+    assert b'id="sender-rules"' in invalid.data
+
+    saved = client.post(
+        "/settings/rules",
+        data={
+            "sender_address": "Billing@Example.invalid",
+            "bucket_id": str(bucket_id),
+            "csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    assert saved.status_code == 302
+    assert saved.headers["Location"].endswith("/settings#sender-rules")
+    with app.app_context():
+        rule = db.session.scalar(select(SenderRule))
+        assert rule.bucket_id == bucket_id
+        address = rule.sender_address
+    listed = client.get("/settings")
+    assert address.encode() in listed.data
+    assert bucket_name.encode() in listed.data
+
+
+def test_reader_actions_rail_and_collapsed_original_text(app, client, connected):
+    with app.app_context():
+        thread_id = db.session.scalar(
+            select(EmailThread.id).where(EmailThread.gmail_thread_id == "fixture-work-review")
+        )
+    reader = client.get(f"/app/threads/{thread_id}", headers={"HX-Request": "true"})
+    assert b'class="reader-rail"' in reader.data
+    assert b"Move to bucket" in reader.data
+    assert b"Summaries can be incomplete or wrong" not in reader.data
+    # Original text stays collapsed, and is fetched from Gmail only when first opened.
+    assert b'<details class="messages" data-messages>' in reader.data
+    assert b'hx-trigger="toggle once from:closest details"' in reader.data
+    assert b'hx-trigger="load"' not in reader.data

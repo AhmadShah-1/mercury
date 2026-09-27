@@ -42,18 +42,21 @@ def test_synthetic_demo_flow(watched_page):
     expect(row).to_contain_text("Unread in Gmail")
     expect(row).to_contain_text("New in Mercury")
 
-    # Reader loads into the panel via HTMX; body arrives separately.
+    # Reader loads into the panel via HTMX; the collapsed original text loads when opened.
     row.locator("[data-reader-link]").click()
     reader = page.locator("#reader-panel")
     expect(reader.locator("#reader-subject")).to_have_text("Revised launch forecast")
     expect(reader).to_contain_text("AI summary")
+    expect(reader.locator("#message-body")).to_be_hidden()
+    reader.locator("[data-messages] > summary").click()
     expect(reader.locator("#message-body")).to_contain_text("forecast", timeout=10_000)
     gmail = reader.get_by_role("link", name=re.compile("Open in Gmail"))
     expect(gmail).to_have_attribute("rel", "noopener noreferrer")
     expect(gmail).to_have_attribute("target", "_blank")
     expect(row).not_to_contain_text("New in Mercury")
 
-    # Move to a bucket in place.
+    # Move to a bucket in place, from the reader's action rail.
+    reader.locator(".rail-menu > summary").click()
     reader.locator("select[name=bucket_id]").select_option(label="Finance")
     reader.get_by_role("button", name="Move", exact=True).click()
     expect(page.locator("#toast-stack")).to_contain_text("Conversation moved")

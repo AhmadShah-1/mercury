@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from authlib.integrations.base_client.errors import OAuthError
 from flask import (
     Blueprint,
@@ -12,6 +14,7 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required, login_user, logout_user
+from sqlalchemy import select
 
 from mercury.accounts.forms import (
     ConfirmDeleteForm,
@@ -26,7 +29,9 @@ from mercury.accounts.service import (
     disconnect_account,
     get_or_create_demo_user,
 )
-from mercury.buckets.service import seed_demo_buckets
+from mercury.buckets.forms import SenderRuleForm
+from mercury.buckets.models import SenderRule
+from mercury.buckets.service import active_buckets, save_sender_rule, seed_demo_buckets
 from mercury.extensions import db
 from mercury.inbox.service import create_run, index_account
 from mercury.integrations.google.oauth import (
@@ -172,18 +177,51 @@ def _label_sync_counts() -> dict[str, int]:
     return {status: count for status, count in rows}
 
 
-def _render_settings(delete_form, status: int = 200):
+def _sender_rule_form() -> SenderRuleForm:
+    form = SenderRuleForm()
+    form.bucket_id.choices = [(str(item.id), item.name) for item in active_buckets(current_user.id)]
+    return form
+
+
+def _render_settings(delete_form, status: int = 200, rule_form: SenderRuleForm | None = None):
+    account = current_user.gmail_account
     label_form = LabelSyncForm()
-    if current_user.gmail_account:
-        label_form.enabled.data = current_user.gmail_account.label_write_consent
+    if account:
+        label_form.enabled.data = account.label_write_consent
+    rules = []
+    if account:
+        rule_form = rule_form or _sender_rule_form()
+        rules = db.session.scalars(
+            select(SenderRule)
+            .where(SenderRule.user_id == current_user.id)
+            .order_by(SenderRule.sender_address)
+        ).all()
     return render_template(
         "accounts/settings.html",
         disconnect_form=EmptyForm(),
         sync_form=EmptyForm(),
         delete_form=delete_form,
         label_form=label_form,
-        label_counts=_label_sync_counts() if current_user.gmail_account else {},
+        label_counts=_label_sync_counts() if account else {},
+        rule_form=rule_form,
+        rules=rules,
     ), status
+
+
+@bp.post("/settings/rules")
+@login_required
+def sender_rules():
+    account = current_user.gmail_account
+    if account is None:
+        abort(404)
+    form = _sender_rule_form()
+    if not form.validate_on_submit():
+        return _render_settings(ConfirmDeleteForm(), 400, rule_form=form)
+    save_sender_rule(
+        current_user.id, account.id, form.sender_address.data, uuid.UUID(form.bucket_id.data)
+    )
+    flash("Sender rule saved.", "success")
+    return redirect(url_for("accounts.settings", _anchor="sender-rules"))
 
 
 @bp.post("/settings/labels")

@@ -705,15 +705,30 @@ hr { border-color: var(--border); opacity: 1; }
 
 /* --------------------------------------------------------------- workspace */
 .app-page main { min-height: 0; }
+/* --ws-list-w is the user's dragged width (set by theme.js/mercury.js); the reader keeps 420px. */
 .workspace {
+  --ws-nav-w: 244px;
+  --ws-list-default: 430px;
   display: grid;
-  grid-template-columns: 244px minmax(340px, 430px) minmax(0, 1fr);
+  grid-template-columns: var(--ws-nav-w) min(var(--ws-list-w, var(--ws-list-default)), calc(100% - var(--ws-nav-w) - 420px)) minmax(0, 1fr);
   height: calc(100vh - var(--topbar-h));
   height: calc(100dvh - var(--topbar-h));
 }
 .ws-nav,
 .ws-list,
 .ws-reader { min-width: 0; min-height: 0; }
+.ws-nav { grid-area: 1 / 1; }
+.ws-list { grid-area: 1 / 2; }
+.ws-reader { grid-area: 1 / 3; }
+
+/* Drag handle straddling the list/reader border; it shares the reader's cell. */
+.ws-resizer { position: relative; z-index: 6; grid-area: 1 / 3; justify-self: start; width: 10px; margin-left: -5px; cursor: col-resize; touch-action: none; outline: none; }
+.ws-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: transparent; transition: background-color 0.15s var(--ease); }
+.ws-resizer:hover::after,
+.ws-resizer:focus-visible::after,
+.is-resizing .ws-resizer::after { background: var(--accent); }
+.is-resizing,
+.is-resizing * { cursor: col-resize !important; user-select: none; }
 
 .ws-nav {
   display: flex;
@@ -721,9 +736,11 @@ hr { border-color: var(--border); opacity: 1; }
   background: var(--canvas);
   border-right: 1px solid var(--border);
 }
+.ws-nav-top { display: flex; justify-content: flex-end; padding: 0.55rem 0.6rem 0; }
+.nav-toggle { color: var(--faint); }
 .ws-nav-scroll { position: relative; flex: 1; overflow-y: auto; padding: 1rem 0.75rem; }
+.js .ws-nav-scroll { padding-top: 0.2rem; }
 .nav-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 0; padding: 0; list-style: none; }
-.nav-list-secondary { margin-top: 1.1rem; padding-top: 0.9rem; border-top: 1px solid var(--border); }
 .nav-item {
   position: relative;
   display: flex;
@@ -928,7 +945,8 @@ a.stat:hover { color: var(--ink); border-color: var(--accent); transform: transl
 
 .reader { max-width: 800px; margin: 0 auto; padding: 0 2rem 3rem; animation: fade-up 0.28s var(--ease) both; }
 .reader-page { width: 100%; max-width: 860px; margin: 0 auto; padding: 0 16px; outline: none; }
-.reader-page .reader { padding: 0 0 3rem; }
+.reader-page .reader { padding: 0 3.6rem 3rem 0; }
+.ws-reader .reader { padding-top: 1.1rem; padding-right: 4.75rem; }
 .reader-bar {
   position: sticky;
   top: 0;
@@ -943,9 +961,7 @@ a.stat:hover { color: var(--ink); border-color: var(--accent); transform: transl
   backdrop-filter: blur(8px);
 }
 .reader-page .reader-bar { top: var(--topbar-h); }
-.ws-reader .back-link { visibility: hidden; }
-.reader-bar-actions { display: flex; align-items: center; gap: 0.35rem; margin-left: auto; }
-.reader-bar .btn { white-space: nowrap; }
+.ws-reader .reader-bar { display: none; }
 .reader-bar .back-link { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .reader-head { padding: 0.75rem 0 0.25rem; }
 .reader-subject { margin: 0.1rem 0 0.7rem; font-size: clamp(1.35rem, 2.3vw, 1.8rem); font-weight: 740; line-height: 1.25; letter-spacing: -0.02em; overflow-wrap: anywhere; outline: none; }
@@ -983,13 +999,11 @@ a.stat:hover { color: var(--ink); border-color: var(--accent); transform: transl
 }
 .summary-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; }
 .summary-title,
-.organize-title,
 .messages-title { display: inline-flex; align-items: center; gap: 0.4rem; margin: 0; font-size: 0.74rem; font-weight: 740; letter-spacing: 0.09em; text-transform: uppercase; }
 .summary-title { color: var(--accent-ink); }
 .summary-text { position: relative; margin: 0.6rem 0 0; color: var(--ink); font-size: 1.01rem; line-height: 1.6; }
 .summary-placeholder { color: var(--muted); font-size: 0.93rem; }
 .summary-note { display: flex; align-items: center; gap: 0.35rem; margin: 0.6rem 0 0; color: var(--warning-ink); font-size: 0.8rem; }
-.summary-foot { margin: 1rem 0 0; padding-top: 0.65rem; color: var(--muted); font-size: 0.76rem; border-top: 1px dashed var(--border); }
 .action-box { margin-top: 1rem; padding: 0.95rem 1rem; background: var(--action-soft); border: 1px solid var(--action-border); border-radius: var(--radius); }
 .action-handled { background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
 .action-dismissed { background: var(--surface-2); border-color: var(--border); }
@@ -1006,17 +1020,79 @@ a.stat:hover { color: var(--ink); border-color: var(--accent); transform: transl
 .action-status { margin: 0; }
 .action-foot { margin: 0.6rem 0 0; color: var(--muted); font-size: 0.75rem; }
 
-.organize-card { margin-top: 1rem; padding: 0.95rem 1.2rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
-.organize-title { color: var(--muted); }
-.move-form { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.6rem; }
-.move-form .form-select { flex: 1; min-width: 0; max-width: 22rem; }
+/* Floating action rail: a zero-height sticky anchor, so it takes no layout space and stays put
+   while the reader scrolls. The reader reserves right padding for it. */
+.reader-rail { position: sticky; top: 0.9rem; z-index: 7; height: 0; }
+.reader-page .reader-rail { top: calc(var(--topbar-h) + 3.6rem); }
+.reader-rail-inner {
+  position: absolute;
+  top: 0;
+  right: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.3rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+}
+.reader-page .reader-rail-inner { right: 0; }
+.rail-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: 8px;
+  cursor: pointer;
+  list-style: none;
+  transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+.rail-btn::-webkit-details-marker { display: none; }
+.rail-btn-primary { color: var(--accent); }
+.rail-btn:hover,
+.rail-btn:focus-visible,
+.rail-menu[open] > .rail-btn { color: var(--accent-ink); background: var(--accent-softer); }
+.rail-btn:focus-visible { outline-offset: -2px; }
+/* The label is the accessible name; it shows as a tooltip on hover and keyboard focus. */
+.rail-label {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 10px);
+  padding: 0.2rem 0.55rem;
+  color: var(--canvas);
+  background: var(--ink);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.12s var(--ease);
+}
+.rail-btn:hover .rail-label,
+.rail-btn:focus-visible .rail-label { opacity: 1; }
+.rail-menu[open] .rail-label { opacity: 0; }
+.rail-menu > .rail-pop { top: -0.3rem; right: calc(100% + 0.7rem); min-width: 264px; padding: 0.35rem 0.6rem 0.6rem; }
+.rail-pop .menu-title { margin-left: 0; margin-right: 0; }
+.move-form { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.35rem; }
+.move-form .form-select { flex: 1; min-width: 0; }
 .organize-hint { margin: 0.55rem 0 0; color: var(--muted); font-size: 0.78rem; }
 
 .messages { margin-top: 1.8rem; }
-.messages-sep { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.75rem; }
+.messages-sep { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; padding: 0.35rem 0; list-style: none; cursor: pointer; border-radius: 8px; }
+.messages-sep::-webkit-details-marker { display: none; }
 .messages-sep::after { content: ""; flex: 1 1 60px; height: 1px; background: var(--sheen-line); }
+.messages-sep:hover .messages-title,
+.messages-sep:hover .messages-chevron { color: var(--accent-ink); }
+.messages-chevron { flex: none; color: var(--muted); transition: transform 0.15s var(--ease); }
+.messages[open] .messages-chevron { transform: rotate(90deg); }
 .messages-title { color: var(--ink-2); }
-.messages-sub { order: 3; width: 100%; color: var(--muted); font-size: 0.75rem; }
+.messages-sub { order: 3; width: 100%; padding-left: calc(1.05rem + 0.6rem); color: var(--muted); font-size: 0.75rem; }
 .messages-count { margin: 0.8rem 0 0; color: var(--muted); font-size: 0.78rem; }
 .message-body { min-height: 4rem; }
 .message { margin-top: 0.75rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
@@ -1142,6 +1218,9 @@ form.htmx-request { cursor: progress; }
 .settings-sync h3 { margin: 0; font-size: 0.92rem; font-weight: 700; }
 .settings-sync p { margin: 0.18rem 0 0; color: var(--muted); font-size: 0.82rem; }
 .settings-sync form { flex: none; margin: 0; }
+.rule-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 0.9rem; }
+.rule-table { margin-top: 1.25rem; }
+.rule-empty { margin: 1rem 0 0; color: var(--muted); font-size: 0.88rem; }
 .developer-tools { margin-top: 0.75rem; color: var(--muted); font-size: 0.8rem; }
 .developer-tools > summary { width: fit-content; cursor: pointer; }
 .developer-tools form { margin-top: 0.65rem; }
@@ -1402,11 +1481,12 @@ form.htmx-request { cursor: progress; }
 
 /* ------------------------------------------------------------ responsive */
 @media (max-width: 1279px) {
-  .workspace { grid-template-columns: 220px minmax(320px, 380px) minmax(0, 1fr); }
+  .workspace { --ws-nav-w: 220px; --ws-list-default: 380px; }
   .reader { padding: 0 1.5rem 3rem; }
 }
 @media (max-width: 1099px) {
-  .workspace { grid-template-columns: 220px minmax(0, 1fr); }
+  .workspace { grid-template-columns: var(--ws-nav-w) minmax(0, 1fr); }
+  .ws-resizer { display: none; }
   .ws-reader { display: none; }
   .ws-list { border-right: 0; }
   .hero-grid { grid-template-columns: 1fr; gap: 3.5rem; }
@@ -1437,7 +1517,6 @@ form.htmx-request { cursor: progress; }
   .nav-heading { padding: 0; }
   .nav-heading-text,
   .nav-hint { display: none; }
-  .nav-list-secondary { margin: 0; padding: 0; border: 0; }
   .nav-item { padding: 0.35rem 0.7rem; white-space: nowrap; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; font-size: 0.84rem; }
   .nav-item[aria-current="page"]::before { display: none; }
   .nav-item[aria-current="page"] { border-color: var(--accent); }
@@ -1489,7 +1568,6 @@ form.htmx-request { cursor: progress; }
   .brand .brand-mark { width: 26px; height: 26px; }
   .topnav .btn-sm { --bs-btn-padding-x: 0.55rem; }
   .hero-copy h1 { font-size: 2.15rem; }
-  .reader-bar .btn { --bs-btn-padding-x: 0.6rem; }
 }
 .panel > .state + form { margin-top: 1.1rem; }
 
@@ -1522,6 +1600,25 @@ form.htmx-request { cursor: progress; }
   transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease);
 }
 .nav-edit:hover { color: var(--accent-ink); background: var(--surface); border-color: var(--accent); }
+/* Crates and Buckets form one section: a heavy rule sets it apart from the views above, its Edit
+   control sits above both headings, and a light rule divides the two groups. */
+.nav-library { margin-top: 1rem; padding-top: 0.55rem; border-top: 2px solid var(--border-strong); }
+.nav-library-head { display: flex; justify-content: flex-end; padding: 0 0.3rem; }
+.nav-library .nav-group-crates { margin-top: 0.15rem; }
+.nav-library .nav-group-buckets { margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px solid var(--border); }
+
+/* Collapsed sidebar: a narrow rail with the toggle and the two views (desktop and tablet). */
+@media (min-width: 760px) {
+  [data-nav="collapsed"] .workspace { --ws-nav-w: 56px; }
+  [data-nav="collapsed"] .ws-nav-top { justify-content: center; padding-left: 0; padding-right: 0; }
+  [data-nav="collapsed"] .ws-nav-scroll { padding-left: 0.5rem; padding-right: 0.5rem; overflow-x: hidden; }
+  [data-nav="collapsed"] .nav-library,
+  [data-nav="collapsed"] .sync-card,
+  [data-nav="collapsed"] .ws-nav .nav-count { display: none; }
+  [data-nav="collapsed"] .ws-nav .nav-item { justify-content: center; padding: 0.55rem 0; }
+  [data-nav="collapsed"] .ws-nav .nav-item[aria-current="page"]::before { left: -0.5rem; }
+  [data-nav="collapsed"] .ws-nav .nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
 .nav-crate.is-expanded > .nav-item .icon { color: var(--accent); }
 .nav-sublist { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 2px 0 6px 1.05rem; padding: 0 0 0 0.5rem; list-style: none; border-left: 1px solid var(--border-strong); }
 .nav-subitem { padding: 0.36rem 0.55rem; font-size: 0.86rem; }
@@ -1882,7 +1979,15 @@ form.htmx-request { cursor: progress; }
   .org-tray .tile-list { grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
 }
 @media (max-width: 759px) {
-  [data-ws-nav-library] { display: contents; }
+  [data-ws-nav-library],
+  .nav-library-head { display: contents; }
+  .ws-nav-top { display: none; }
+  /* Phones: no room beside the text, so the rail floats bottom-right and its menu opens upward. */
+  .reader-page .reader { padding-right: 0; }
+  .reader-page .reader-rail-inner { position: fixed; top: auto; right: 12px; bottom: 16px; }
+  .rail-menu > .rail-pop { top: auto; bottom: -0.3rem; }
+  .nav-library .nav-group-crates,
+  .nav-library .nav-group-buckets { margin: 0; padding: 0; border: 0; }
   .nav-group-crates .nav-heading,
   .nav-group-buckets .nav-heading { flex: none; }
   .nav-edit { align-self: center; padding: 0.35rem 0.7rem; color: var(--accent-ink); background: var(--surface); border-color: var(--border); font-size: 0.84rem; white-space: nowrap; }

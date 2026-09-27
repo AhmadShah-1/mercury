@@ -451,6 +451,98 @@
     if (event.target.matches?.("[data-list-filter]")) applyFilter();
   });
 
+  /* ------------------------------------------ workspace: layout prefs */
+  // theme.js applies the saved values before first paint; only a flag and a width are stored.
+  const navToggle = () => doc.querySelector("[data-nav-toggle]");
+  const syncNavToggle = () => {
+    const button = navToggle();
+    if (!button) return;
+    const collapsed = root.getAttribute("data-nav") === "collapsed";
+    const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
+    button.setAttribute("aria-expanded", String(!collapsed));
+    button.title = `${label} ([)`;
+    const text = button.querySelector("[data-nav-toggle-label]");
+    if (text) text.textContent = label;
+  };
+  const toggleNav = () => {
+    if (root.getAttribute("data-nav") === "collapsed") {
+      root.removeAttribute("data-nav");
+      safeStorage.remove("localStorage", "mercury-nav");
+    } else {
+      root.setAttribute("data-nav", "collapsed");
+      safeStorage.set("localStorage", "mercury-nav", "collapsed");
+    }
+    syncNavToggle();
+    syncResizer();
+  };
+  doc.addEventListener("click", (event) => {
+    if (event.target.closest("[data-nav-toggle]")) toggleNav();
+  });
+
+  /* The list/reader divider. CSS also clamps --ws-list-w so a width saved on a wider
+     window never squeezes the reader below its minimum. */
+  const MIN_LIST = 280;
+  const MIN_READER = 420;
+  const resizer = () => doc.querySelector("[data-list-resizer]");
+  const listWidth = () => doc.getElementById("ws-list")?.getBoundingClientRect().width || 0;
+  const listBounds = () => {
+    const workspace = doc.querySelector("[data-workspace]");
+    const nav = doc.getElementById("ws-nav");
+    const room = (workspace?.clientWidth || window.innerWidth) - (nav?.offsetWidth || 0) - MIN_READER;
+    return [MIN_LIST, Math.max(MIN_LIST, Math.floor(room))];
+  };
+  const syncResizer = () => {
+    const handle = resizer();
+    if (!handle) return;
+    const [min, max] = listBounds();
+    handle.setAttribute("aria-valuemin", String(min));
+    handle.setAttribute("aria-valuemax", String(max));
+    handle.setAttribute("aria-valuenow", String(Math.round(listWidth())));
+  };
+  const setListWidth = (px, persist) => {
+    const [min, max] = listBounds();
+    const width = Math.round(Math.min(max, Math.max(min, px)));
+    root.style.setProperty("--ws-list-w", `${width}px`);
+    if (persist) safeStorage.set("localStorage", "mercury-list-width", String(width));
+    syncResizer();
+  };
+  const resetListWidth = () => {
+    root.style.removeProperty("--ws-list-w");
+    safeStorage.remove("localStorage", "mercury-list-width");
+    syncResizer();
+  };
+  const armResizer = () => {
+    const handle = resizer();
+    if (!handle) return;
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = listWidth();
+      handle.setPointerCapture(event.pointerId);
+      root.classList.add("is-resizing");
+      const onMove = (move) => setListWidth(startWidth + move.clientX - startX, false);
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("lostpointercapture", () => {
+        handle.removeEventListener("pointermove", onMove);
+        root.classList.remove("is-resizing");
+        setListWidth(listWidth(), true);
+      }, { once: true });
+    });
+    handle.addEventListener("dblclick", resetListWidth);
+    // Bound on the handle itself, so it runs before (and pre-empts) the document shortcuts.
+    handle.addEventListener("keydown", (event) => {
+      const step = event.shiftKey ? 96 : 24;
+      const [min, max] = listBounds();
+      const next = { ArrowLeft: listWidth() - step, ArrowRight: listWidth() + step, Home: min, End: max }[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      setListWidth(next, true);
+    });
+    window.addEventListener("resize", syncResizer);
+    syncResizer();
+  };
+
   /* ------------------------------------------------ keyboard shortcuts */
   const shortcutsDialog = () => doc.getElementById("shortcuts-dialog");
   const focusedRow = () => doc.activeElement?.closest?.("[data-thread-row]") || (lastReaderRowId && doc.getElementById(lastReaderRowId));
@@ -485,7 +577,7 @@
       }
       return;
     }
-    if (!list && event.key !== "?") return;
+    if (!list && event.key !== "?" && event.key !== "[") return;
     const inList = !!target.closest?.("[data-thread-list]");
     switch (event.key) {
       case "?":
@@ -493,6 +585,9 @@
         break;
       case "/":
         if (filter) { event.preventDefault(); filter.focus(); filter.select(); }
+        break;
+      case "[":
+        if (navToggle()) { event.preventDefault(); toggleNav(); }
         break;
       case "j":
         event.preventDefault(); moveFocus(1); break;
@@ -543,6 +638,8 @@
     watchToasts();
     localizeTimes(doc);
     syncSelection();
+    syncNavToggle();
+    armResizer();
     const current = doc.querySelector("[data-thread-row].is-current");
     if (current) lastReaderRowId = current.id;
     if (window.htmx) window.htmx.onLoad((node) => localizeTimes(node.nodeType === 1 ? node : doc));

@@ -7,15 +7,40 @@
 {% set sender = thread.participants[-1] if thread.participants else {} %}
 {% set ai = ai_state(thread, analysis, account)|trim %}
 {% set in_bucket = bucket is not none and not bucket.archived %}
+{#- Floating action rail. It sits outside the article so the article's entry animation
+    (a transform) never becomes its containing block. -#}
+<div class="reader-rail">
+  <div class="reader-rail-inner" role="group" aria-label="Conversation actions">
+    {%- if search_url %}
+    <a class="rail-btn" href="{{ search_url }}" target="_blank" rel="noopener noreferrer">{{ icon("search", "icon-sm") }}<span class="rail-label">Find by Message-ID<span class="visually-hidden"> in Gmail (opens in a new tab)</span></span></a>
+    {%- endif %}
+    <a class="rail-btn rail-btn-primary" href="{{ open_url }}" target="_blank" rel="noopener noreferrer">{{ icon("external", "icon-sm") }}<span class="rail-label">Open in Gmail<span class="visually-hidden"> (opens in a new tab)</span></span></a>
+    <details class="menu rail-menu" data-menu>
+      <summary class="rail-btn">{{ icon("bucket", "icon-sm") }}<span class="rail-label">Move to bucket</span></summary>
+      <div class="menu-pop rail-pop">
+        <p class="menu-title">Move to bucket</p>
+        {% if buckets %}
+        <form class="move-form" method="post" action="{{ url_for('inbox.move', thread_id=thread.id) }}" hx-post="{{ url_for('inbox.move', thread_id=thread.id) }}" hx-target="#reader-panel" hx-swap="innerHTML" hx-disabled-elt="find button">
+          {{ move_form.csrf_token }}
+          <label class="visually-hidden" for="move-{{ thread.id }}">Move this conversation to</label>
+          <select class="form-select form-select-sm" id="move-{{ thread.id }}" name="{{ move_form.bucket_id.name }}" required>
+            {% for value, label in move_form.bucket_id.choices %}<option value="{{ value }}"{% if value == move_form.bucket_id.data %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+          <button class="btn btn-primary btn-sm" type="submit">Move</button>
+        </form>
+        <p class="organize-hint">A manual move keeps this conversation in place when suggestions are refreshed. Gmail is not changed{% if config.GMAIL_LABEL_WRITES_ENABLED and account.label_write_consent %} except for Mercury-owned labels{% endif %}.</p>
+        {% else %}
+        <p class="organize-hint">No buckets yet. <a href="{{ url_for('buckets.create') }}">Create a bucket</a> to organize this conversation.</p>
+        {% endif %}
+      </div>
+    </details>
+  </div>
+</div>
 <article class="reader" aria-labelledby="reader-subject" data-reader data-thread-id="{{ thread.id }}">
   <div class="reader-bar">
     <a class="back-link" href="{{ url_for('inbox.bucket_workspace', bucket_id=bucket.id) if in_bucket else url_for('inbox.workspace') }}" data-reader-back>
       {{ icon("arrow-left", "icon-sm") }}<span>Back<span class="hide-md"> to {{ bucket.name if in_bucket else "Overview" }}</span></span>
     </a>
-    <div class="reader-bar-actions">
-      {%- if search_url %}<a class="btn btn-ghost btn-sm" href="{{ search_url }}" target="_blank" rel="noopener noreferrer" title="Search Gmail for this conversation's Message-ID">{{ icon("search", "icon-sm") }}<span class="hide-md"> Find by Message-ID</span><span class="visually-hidden"> in Gmail (opens in a new tab)</span></a>{% endif %}
-      <a class="btn btn-primary btn-sm" href="{{ open_url }}" target="_blank" rel="noopener noreferrer">{{ icon("external", "icon-sm") }} Open in Gmail<span class="visually-hidden"> (opens in a new tab)</span></a>
-    </div>
   </div>
 
   <header class="reader-head">
@@ -84,37 +109,21 @@
       <p class="action-foot">These controls change Mercury only. Nothing is sent, paid, or changed in Gmail.</p>
     </div>
     {% endif %}
-    <p class="summary-foot">{% if config.AI_PROVIDER == "fake" %}Synthetic fixture output for the offline demo.{% else %}Generated from message text by the configured AI provider.{% endif %} Summaries can be incomplete or wrong — the original is below.</p>
   </section>
 
-  <section class="organize-card" aria-labelledby="organize-heading">
-    <h3 class="organize-title" id="organize-heading">{{ icon("bucket", "icon-sm") }} Bucket</h3>
-    {% if buckets %}
-    <form class="move-form" method="post" action="{{ url_for('inbox.move', thread_id=thread.id) }}" hx-post="{{ url_for('inbox.move', thread_id=thread.id) }}" hx-target="#reader-panel" hx-swap="innerHTML" hx-disabled-elt="find button">
-      {{ move_form.csrf_token }}
-      <label class="visually-hidden" for="move-{{ thread.id }}">Move this conversation to</label>
-      <select class="form-select form-select-sm" id="move-{{ thread.id }}" name="{{ move_form.bucket_id.name }}" required>
-        {% for value, label in move_form.bucket_id.choices %}<option value="{{ value }}"{% if value == move_form.bucket_id.data %} selected{% endif %}>{{ label }}</option>{% endfor %}
-      </select>
-      <button class="btn btn-quiet btn-sm" type="submit">Move</button>
-    </form>
-    <p class="organize-hint">A manual move keeps this conversation in place when suggestions are refreshed. Gmail is not changed{% if config.GMAIL_LABEL_WRITES_ENABLED and account.label_write_consent %} except for Mercury-owned labels{% endif %}.</p>
-    {% else %}
-    <p class="organize-hint">No buckets yet. <a href="{{ url_for('buckets.create') }}">Create a bucket</a> to organize this conversation.</p>
-    {% endif %}
-  </section>
-
-  <section class="messages" aria-labelledby="messages-heading">
-    <div class="messages-sep">
+  {#- Collapsed by default; the original text is fetched from Gmail only when first opened. -#}
+  <details class="messages" data-messages>
+    <summary class="messages-sep">
+      {{ icon("chevron-right", "icon-sm messages-chevron") }}
       <h3 class="messages-title" id="messages-heading">Original messages</h3>
       <span class="messages-sub">From Gmail · newest first · not stored</span>
-    </div>
-    <div id="message-body" class="message-body" data-swap-errors hx-get="{{ url_for('inbox.thread_body', thread_id=thread.id) }}" hx-trigger="load" hx-swap="innerHTML" aria-live="polite" aria-busy="true">
+    </summary>
+    <div id="message-body" class="message-body" data-swap-errors hx-get="{{ url_for('inbox.thread_body', thread_id=thread.id) }}" hx-trigger="toggle once from:closest details" hx-swap="innerHTML" aria-live="polite" aria-busy="true">
       <div class="body-skeleton js-only" aria-hidden="true">
         <span class="sk sk-line w-40"></span><span class="sk sk-line"></span><span class="sk sk-line"></span><span class="sk sk-line w-75"></span><span class="sk sk-line w-60"></span>
       </div>
       <p class="loading-text js-only">Fetching original message text from Gmail…</p>
       <noscript><p class="loading-text"><a href="{{ url_for('inbox.thread_body', thread_id=thread.id) }}">Show the original message text</a> (plain page).</p></noscript>
     </div>
-  </section>
+  </details>
 </article>
